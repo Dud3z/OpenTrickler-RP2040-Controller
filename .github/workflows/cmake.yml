@@ -32,6 +32,10 @@ jobs:
         sudo apt-get update
         sudo apt install -y cmake gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential libstdc++-arm-none-eabi-newlib python3
 
+    # Host side tests of the adaptive trickle controller (model, learning, simulator benchmark)
+    - name: Run AI Trickle Simulation Tests
+      run: make -C tests/sim run
+
     # Build Pico2 W support package into build_pico2_w
     - name: Build Pico2 W Package
       run: |

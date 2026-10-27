@@ -27,6 +27,7 @@
 #include "menu.h"
 #include "profile.h"
 #include "servo_gate.h"
+#include "ai_trickle.h"
 
 
 int main()
@@ -58,6 +59,9 @@ int main()
 
     // Initialize profile data
     profile_data_init();
+
+    // Initialize the adaptive trickle models (after the profiles)
+    ai_trickle_init();
 
     // Initialize the servo
     servo_gate_init();

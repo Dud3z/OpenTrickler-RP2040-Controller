@@ -83,3 +83,7 @@ build*/
 
 # Local ARM toolchain download
 .toolchain/
+# Host side simulator binaries
+tests/sim/trickle_bench
+tests/sim/trickle_test
+tests/sim/trickle_export

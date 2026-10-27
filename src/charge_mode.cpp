@@ -21,6 +21,7 @@
 #include "profile.h"
 #include "common.h"
 #include "servo_gate.h"
+#include "ai_trickle.h"
 
 
 uint8_t charge_weight_digits[] = {0, 0, 0, 0, 0};
@@ -64,6 +65,7 @@ static char title_string[30];
 
 static TickType_t charge_start_tick = 0;
 static float last_charge_elapsed_seconds = 0.0f;
+static bool last_charge_adaptive = false;
 
 // Coarse trickler end-of-trickle backoff
 #define COARSE_STOP_BACKOFF_MAX_MS 15000  // safety cap
@@ -246,7 +248,213 @@ void charge_mode_wait_for_zero() {
     charge_mode_config.charge_mode_state = CHARGE_MODE_WAIT_FOR_COMPLETE;
 }
 
+static float charge_elapsed_s(TickType_t tick) {
+    return (float) ((tick - charge_start_tick) * portTICK_PERIOD_MS) / 1000.0f;
+}
+
+
+static void charge_mode_get_trickler_limits(trickle_motor_limits_t * limits) {
+    profile_t * current_profile = profile_get_selected();
+
+    // Find the minimum of max speed from the motor and the profile
+    limits->coarse_max_rps = fmin(get_motor_max_speed(SELECT_COARSE_TRICKLER_MOTOR),
+                                  current_profile->coarse_max_flow_speed_rps);
+    limits->coarse_min_rps = fmax(get_motor_min_speed(SELECT_COARSE_TRICKLER_MOTOR),
+                                  current_profile->coarse_min_flow_speed_rps);
+    limits->fine_max_rps = fmin(get_motor_max_speed(SELECT_FINE_TRICKLER_MOTOR),
+                                current_profile->fine_max_flow_speed_rps);
+    limits->fine_min_rps = fmax(get_motor_min_speed(SELECT_FINE_TRICKLER_MOTOR),
+                                current_profile->fine_min_flow_speed_rps);
+}
+
+
+// Common end of a charge: stop the timer, close the gate and precharge
+static void charge_mode_finish_charge() {
+    // Stop the timer 
+    TickType_t now = xTaskGetTickCount();
+    TickType_t elapsed_ticks = now - charge_start_tick;
+    last_charge_elapsed_seconds = (float)(elapsed_ticks * portTICK_PERIOD_MS) / 1000.0f;
+
+    // Close the gate if the servo gate is present
+    if (servo_gate.eeprom_servo_gate_config.servo_gate_enable) {
+    servo_gate_set_ratio(SERVO_GATE_RATIO_CLOSED, true);
+    }
+
+    // Precharge
+    if (charge_mode_config.eeprom_charge_mode_data.precharge_enable &&
+    servo_gate.eeprom_servo_gate_config.servo_gate_enable) {
+        // Set a fixed delay between closing the gate and precharge to allow the gate to fully close
+        vTaskDelay(pdMS_TO_TICKS(500));
+
+        // Start the pre-charge
+        motor_set_speed(SELECT_COARSE_TRICKLER_MOTOR, charge_mode_config.eeprom_charge_mode_data.precharge_speed_rps);
+        vTaskDelay(pdMS_TO_TICKS(charge_mode_config.eeprom_charge_mode_data.precharge_time_ms));
+
+        motor_set_speed(SELECT_COARSE_TRICKLER_MOTOR, 0);
+    }
+    else {
+        vTaskDelay(pdMS_TO_TICKS(20));  // Wait for other tasks to complete  
+    }
+
+    charge_mode_config.charge_mode_state = CHARGE_MODE_WAIT_FOR_CUP_REMOVAL;
+}
+
+
+static void charge_mode_set_charging_title(trickle_phase_t phase) {
+    char target_weight_string[WEIGHT_STRING_LEN];
+    float_to_string(target_weight_string, charge_mode_config.target_charge_weight, charge_mode_config.eeprom_charge_mode_data.decimal_places);
+
+    if (ai_trickle_learn_active()) {
+        snprintf(title_string, sizeof(title_string), "Learn %d/%d %s",
+                 ai_trickle_learn_done() + 1, ai_trickle_learn_total(), target_weight_string);
+    }
+    else if (phase == TRICKLE_PHASE_PROBE || phase == TRICKLE_PHASE_TOPUP) {
+        snprintf(title_string, sizeof(title_string), "%s %s", ai_trickle_phase_name(phase), target_weight_string);
+    }
+    else {
+        snprintf(title_string, sizeof(title_string), "AI: %s", target_weight_string);
+    }
+}
+
+
+/*
+ * Adaptive charge: the AI trickle controller predicts the powder in flight
+ * and stops ahead of time, then tops up if needed. See trickle_model.h.
+ */
+static void charge_mode_wait_for_complete_adaptive() {
+    charge_start_tick = xTaskGetTickCount();
+    coarse_backoff_in_progress = false;
+
+    // Set colour to under charge
+    neopixel_led_set_colour(
+        neopixel_led_config.eeprom_neopixel_led_metadata.default_led_colours.mini12864_backlight_colour,
+        charge_mode_config.eeprom_charge_mode_data.neopixel_under_charge_colour, 
+        charge_mode_config.eeprom_charge_mode_data.neopixel_under_charge_colour, 
+        true
+    );
+
+    // If the servo gate is used then it has to be opened
+    if (servo_gate.eeprom_servo_gate_config.servo_gate_enable) {
+        servo_gate_set_ratio(SERVO_GATE_RATIO_OPEN, false);
+    }
+
+    trickle_motor_limits_t limits;
+    charge_mode_get_trickler_limits(&limits);
+
+    ai_trickle_adaptive_begin(charge_mode_config.target_charge_weight, &limits, scale_get_current_measurement());
+
+    trickle_phase_t last_phase = TRICKLE_PHASE_DONE;
+
+    while (true) {
+        // Non block waiting for the input
+        ButtonEncoderEvent_t button_encoder_event = button_wait_for_input(false);
+        if (button_encoder_event == BUTTON_RST_PRESSED) {
+            motor_set_speed(SELECT_FINE_TRICKLER_MOTOR, 0);
+            motor_set_speed(SELECT_COARSE_TRICKLER_MOTOR, 0);
+            ai_trickle_adaptive_end(charge_elapsed_s(xTaskGetTickCount()));
+            ai_trickle_learn_stop();
+            charge_mode_config.charge_mode_state = CHARGE_MODE_EXIT;
+            return;
+        }
+
+        float current_weight;
+        if (!scale_block_wait_for_next_measurement(200, &current_weight)) {
+            continue;
+        }
+        TickType_t current_sample_tick = xTaskGetTickCount();
+        float t = charge_elapsed_s(current_sample_tick);
+
+        // Handle coarse trickler backoff stop
+        if (coarse_backoff_in_progress && (current_sample_tick >= coarse_backoff_end_tick)) {
+            motor_set_speed(SELECT_COARSE_TRICKLER_MOTOR, 0);
+            coarse_backoff_in_progress = false;
+        }
+
+        float coarse_rps;
+        float fine_rps;
+        uint32_t events;
+        trickle_phase_t phase = ai_trickle_adaptive_step(t, current_weight, &coarse_rps, &fine_rps, &events);
+
+        if (events & TRICKLE_EVENT_COARSE_STOPPED) {
+            motor_set_speed(SELECT_COARSE_TRICKLER_MOTOR, 0);
+
+            // When the coarse trickler stops, move the servo gate to a configured ratio
+            if (servo_gate.eeprom_servo_gate_config.servo_gate_enable && phase != TRICKLE_PHASE_PROBE) {
+                servo_gate_set_ratio(charge_mode_config.eeprom_charge_mode_data.coarse_stop_gate_ratio, false);
+            }
+            coarse_trickler_backoff(limits.coarse_min_rps);
+        }
+
+        if (!coarse_backoff_in_progress) {
+            motor_set_speed(SELECT_COARSE_TRICKLER_MOTOR, coarse_rps);
+        }
+        motor_set_speed(SELECT_FINE_TRICKLER_MOTOR, fine_rps);
+
+        if (phase != last_phase) {
+            charge_mode_set_charging_title(phase);
+            last_phase = phase;
+        }
+
+        if (phase == TRICKLE_PHASE_FAULT_NO_FLOW || phase == TRICKLE_PHASE_FAULT_TIMEOUT) {
+            motor_set_speed(SELECT_FINE_TRICKLER_MOTOR, 0);
+            motor_set_speed(SELECT_COARSE_TRICKLER_MOTOR, 0);
+            coarse_backoff_in_progress = false;
+
+            // Most likely the hopper ran empty: wait for the user
+            snprintf(title_string, sizeof(title_string),
+                     phase == TRICKLE_PHASE_FAULT_NO_FLOW ? "No flow! Press=retry" : "Timeout! Press=retry");
+            neopixel_led_set_colour(
+                neopixel_led_config.eeprom_neopixel_led_metadata.default_led_colours.mini12864_backlight_colour,
+                charge_mode_config.eeprom_charge_mode_data.neopixel_over_charge_colour,
+                charge_mode_config.eeprom_charge_mode_data.neopixel_over_charge_colour,
+                true
+            );
+
+            while (true) {
+                ButtonEncoderEvent_t event = button_wait_for_input(true);
+                if (event == BUTTON_RST_PRESSED) {
+                    ai_trickle_adaptive_end(charge_elapsed_s(xTaskGetTickCount()));
+                    ai_trickle_learn_stop();
+                    charge_mode_config.charge_mode_state = CHARGE_MODE_EXIT;
+                    return;
+                }
+                if (event == BUTTON_ENCODER_PRESSED) {
+                    break;
+                }
+            }
+
+            neopixel_led_set_colour(
+                neopixel_led_config.eeprom_neopixel_led_metadata.default_led_colours.mini12864_backlight_colour,
+                charge_mode_config.eeprom_charge_mode_data.neopixel_under_charge_colour,
+                charge_mode_config.eeprom_charge_mode_data.neopixel_under_charge_colour,
+                true
+            );
+            ai_trickle_adaptive_resume(charge_elapsed_s(xTaskGetTickCount()), scale_get_current_measurement());
+            last_phase = TRICKLE_PHASE_DONE;
+            continue;
+        }
+
+        if (phase == TRICKLE_PHASE_DONE) {
+            break;
+        }
+    }
+
+    motor_set_speed(SELECT_FINE_TRICKLER_MOTOR, 0);
+    motor_set_speed(SELECT_COARSE_TRICKLER_MOTOR, 0);
+
+    // Learning (model fit) happens here, while the user removes the cup
+    ai_trickle_adaptive_end(charge_elapsed_s(xTaskGetTickCount()));
+
+    charge_mode_finish_charge();
+}
+
+
 void charge_mode_wait_for_complete() {
+    last_charge_adaptive = ai_trickle_adaptive_active();
+    if (last_charge_adaptive) {
+        charge_mode_wait_for_complete_adaptive();
+        return;
+    }
 
     charge_start_tick = xTaskGetTickCount();
     coarse_backoff_in_progress = false;
@@ -298,6 +506,10 @@ void charge_mode_wait_for_complete() {
     TickType_t current_sample_tick = last_sample_tick;
     bool should_coarse_trickler_move = true;
 
+    // Record the charge so the AI model can learn from classic charges too
+    ai_trickle_classic_begin();
+    float recorded_coarse_rps = 0.0f;
+
     while (true) {
         // Non block waiting for the input
         ButtonEncoderEvent_t button_encoder_event = button_wait_for_input(false);
@@ -329,6 +541,7 @@ void charge_mode_wait_for_complete() {
             // Stop all motors
             motor_set_speed(SELECT_FINE_TRICKLER_MOTOR, 0);
             motor_set_speed(SELECT_COARSE_TRICKLER_MOTOR, 0);
+            ai_trickle_classic_sample(charge_elapsed_s(current_sample_tick), current_weight, 0.0f, 0.0f);
 
             break;
         }
@@ -339,6 +552,8 @@ void charge_mode_wait_for_complete() {
 
             should_coarse_trickler_move = false;
             motor_set_speed(SELECT_COARSE_TRICKLER_MOTOR, 0);
+            recorded_coarse_rps = 0.0f;
+            ai_trickle_classic_coarse_stop(charge_elapsed_s(current_sample_tick));
 
             // NEW: When the coarse trickler stops, move the servo gate to a configured ratio
             // Ratio convention: 0.0 = open, 1.0 = close
@@ -364,6 +579,7 @@ void charge_mode_wait_for_complete() {
         float new_d = current_profile->fine_kd * fine_trickler_derivative;
         float new_speed = fmaxf(fine_trickler_min_speed, fminf(new_p + new_i + new_d, fine_trickler_max_speed));
         motor_set_speed(SELECT_FINE_TRICKLER_MOTOR, new_speed);
+        float recorded_fine_rps = new_speed;
 
         // Update coarse trickler speed
         if (should_coarse_trickler_move && !coarse_backoff_in_progress) {
@@ -377,7 +593,10 @@ void charge_mode_wait_for_complete() {
             new_speed = fmaxf(coarse_trickler_min_speed, fminf(new_p + new_i + new_d, coarse_trickler_max_speed));
 
             motor_set_speed(SELECT_COARSE_TRICKLER_MOTOR, new_speed);
+            recorded_coarse_rps = new_speed;
         }
+
+        ai_trickle_classic_sample(charge_elapsed_s(current_sample_tick), current_weight, recorded_coarse_rps, recorded_fine_rps);
 
         // Record state
         last_sample_tick = current_sample_tick;
@@ -385,33 +604,7 @@ void charge_mode_wait_for_complete() {
         coarse_trickler_last_error = coarse_trickler_error;
     }
 
-    // Stop the timer 
-    TickType_t now = xTaskGetTickCount();
-    TickType_t elapsed_ticks = now - charge_start_tick;
-    last_charge_elapsed_seconds = (float)(elapsed_ticks * portTICK_PERIOD_MS) / 1000.0f;
-
-    // Close the gate if the servo gate is present
-    if (servo_gate.eeprom_servo_gate_config.servo_gate_enable) {
-    servo_gate_set_ratio(SERVO_GATE_RATIO_CLOSED, true);
-    }
-
-    // Precharge
-    if (charge_mode_config.eeprom_charge_mode_data.precharge_enable &&
-    servo_gate.eeprom_servo_gate_config.servo_gate_enable) {
-        // Set a fixed delay between closing the gate and precharge to allow the gate to fully close
-        vTaskDelay(pdMS_TO_TICKS(500));
-
-        // Start the pre-charge
-        motor_set_speed(SELECT_COARSE_TRICKLER_MOTOR, charge_mode_config.eeprom_charge_mode_data.precharge_speed_rps);
-        vTaskDelay(pdMS_TO_TICKS(charge_mode_config.eeprom_charge_mode_data.precharge_time_ms));
-
-        motor_set_speed(SELECT_COARSE_TRICKLER_MOTOR, 0);
-    }
-    else {
-        vTaskDelay(pdMS_TO_TICKS(20));  // Wait for other tasks to complete  
-    }
-
-    charge_mode_config.charge_mode_state = CHARGE_MODE_WAIT_FOR_CUP_REMOVAL;
+    charge_mode_finish_charge();
 }
 
 void charge_mode_wait_for_cup_removal() {
@@ -421,15 +614,43 @@ void charge_mode_wait_for_cup_removal() {
     FloatRingBuffer data_buffer(5);
 
     // Post charge analysis (while waiting for removal of the cup)
-    vTaskDelay(pdMS_TO_TICKS(1000));  // Wait for other tasks to complete
+    if (last_charge_adaptive) {
+        vTaskDelay(pdMS_TO_TICKS(1000));  // Wait for other tasks to complete
+    }
+    else {
+        // Same wait, but keep recording so the AI model sees the powder settle
+        TickType_t settle_start_tick = xTaskGetTickCount();
+        while (xTaskGetTickCount() - settle_start_tick < pdMS_TO_TICKS(1000)) {
+            float settle_weight;
+            if (scale_block_wait_for_next_measurement(200, &settle_weight)) {
+                ai_trickle_classic_sample(charge_elapsed_s(xTaskGetTickCount()), settle_weight, 0.0f, 0.0f);
+            }
+        }
+    }
 
     // Take current measurement
     float current_measurement = scale_get_current_measurement();
     float error = charge_mode_config.target_charge_weight - current_measurement;
 
+    float threshold = charge_mode_config.eeprom_charge_mode_data.fine_stop_threshold;
+    if (last_charge_adaptive) {
+        // Green means within the tolerance of the selected precision level
+        threshold = ai_trickle_tolerance() + 0.001f;
+
+        if (ai_trickle_learn_just_finished()) {
+            snprintf(title_string, sizeof(title_string), "Learned! Remove Cup");
+        }
+        else {
+            snprintf(title_string, sizeof(title_string), "Remove Cup %+.3f", -error);
+        }
+    }
+    else {
+        ai_trickle_classic_end(charge_mode_config.target_charge_weight, current_measurement, last_charge_elapsed_seconds);
+    }
+
     // Update LED colour before moving to the next stage
     // Over charged
-    if (error <= -charge_mode_config.eeprom_charge_mode_data.fine_stop_threshold) {
+    if (error <= -threshold) {
         neopixel_led_set_colour(
             neopixel_led_config.eeprom_neopixel_led_metadata.default_led_colours.mini12864_backlight_colour,
             charge_mode_config.eeprom_charge_mode_data.neopixel_over_charge_colour, 
@@ -441,7 +662,7 @@ void charge_mode_wait_for_cup_removal() {
         charge_mode_config.charge_mode_event |= CHARGE_MODE_EVENT_OVER_CHARGE;
     }
     // Under charged
-    else if (error >= charge_mode_config.eeprom_charge_mode_data.fine_stop_threshold) {
+    else if (error >= threshold) {
         neopixel_led_set_colour(
             neopixel_led_config.eeprom_neopixel_led_metadata.default_led_colours.mini12864_backlight_colour, 
             charge_mode_config.eeprom_charge_mode_data.neopixel_under_charge_colour, 
@@ -619,6 +840,9 @@ uint8_t charge_mode_menu(bool charge_mode_skip_user_input) {
                             neopixel_led_config.eeprom_neopixel_led_metadata.default_led_colours.led1_colour,
                             neopixel_led_config.eeprom_neopixel_led_metadata.default_led_colours.led2_colour,
                             true);
+
+    // A learning session ends with the charge mode
+    ai_trickle_learn_stop();
 
     // vTaskDelete(scale_measurement_render_handler);
     vTaskSuspend(scale_measurement_render_task_handler);

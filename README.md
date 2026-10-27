@@ -48,6 +48,8 @@ Join our [discord server](https://discord.gg/ZhdThA2vrW) for help and developmen
 
 * Cleanup Mode
 
+* AI Trickle: adaptive, self-learning charge controller with optional Claude assistant, see [manuals/ai_trickle.md](manuals/ai_trickle.md)
+
 ## Get Started
 
 ### Use with mini 12864 display

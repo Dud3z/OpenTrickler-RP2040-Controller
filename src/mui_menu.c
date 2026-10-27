@@ -14,6 +14,7 @@
 #include "common.h"
 #include "profile.h"
 #include "servo_gate.h"
+#include "ai_trickle.h"
 
 
 // External modules/varaibles
@@ -23,6 +24,7 @@ extern charge_mode_config_t charge_mode_config;
 extern servo_gate_t servo_gate;
 extern scale_config_t scale_config;
 extern eeprom_profile_data_t profile_data;
+extern eeprom_ai_trickle_data_t ai_trickle_data;
 
 
 const char * get_selected_profile_name(void * data, uint16_t idx) {
@@ -165,6 +167,67 @@ uint8_t render_charge_mode_next_button(mui_t * ui, uint8_t msg) {
 }
 
 
+// Same as render_charge_mode_next_button, for the AI learning weight forms
+uint8_t render_ai_learn_next_button(mui_t * ui, uint8_t msg) {
+    switch (msg) {
+        case MUIF_MSG_CURSOR_SELECT:
+        case MUIF_MSG_VALUE_INCREMENT:
+        case MUIF_MSG_VALUE_DECREMENT:
+            mui_SaveForm(ui);
+            if (charge_mode_config.eeprom_charge_mode_data.decimal_places == DP_2) {
+                ui->arg = 73;  // goto form 73
+            }
+            else if (charge_mode_config.eeprom_charge_mode_data.decimal_places == DP_3) {
+                ui->arg = 74;  // goto form 74
+            }
+            return mui_GotoFormAutoCursorPosition(ui, ui->arg);
+        default:
+            mui_u8g2_btn_goto_wm_fi(ui, msg);
+            break;
+    }
+
+    return 0;
+}
+
+
+uint8_t render_ai_model_details(mui_t *ui, uint8_t msg) {
+    switch(msg)
+    {
+        case MUIF_MSG_DRAW:
+        {
+            char buf[32];
+            u8g2_t *u8g2 = mui_get_U8g2(ui);
+            const trickle_model_t * model = ai_trickle_selected_model();
+
+            u8g2_SetFont(u8g2, u8g2_font_profont11_tf);
+
+            if (!trickle_model_is_ready(model)) {
+                u8g2_DrawStr(u8g2, 5, 25, "Not learned yet.");
+                u8g2_DrawStr(u8g2, 5, 35, "Run Learn Profile or");
+                u8g2_DrawStr(u8g2, 5, 45, "just start charging.");
+                break;
+            }
+
+            snprintf(buf, sizeof(buf), "Throws:%u %s", model->learned_throws,
+                     (model->flags & TRICKLE_MODEL_FLAG_DRIFT) ? "DRIFT" :
+                     ((model->flags & TRICKLE_MODEL_FLAG_CONVERGED) ? "OK" : ""));
+            u8g2_DrawStr(u8g2, 5, 23, buf);
+
+            snprintf(buf, sizeof(buf), "gr/rev C:%.3f F:%.3f", model->coarse_gpr, model->fine_gpr);
+            u8g2_DrawStr(u8g2, 5, 33, buf);
+
+            snprintf(buf, sizeof(buf), "Lag:%.2fs Tail:%.2f", model->latency_s, model->coarse_tail_gr);
+            u8g2_DrawStr(u8g2, 5, 43, buf);
+
+            snprintf(buf, sizeof(buf), "Err:%+.3f+-%.3f", model->final_mean_gr, model->final_sd_gr);
+            u8g2_DrawStr(u8g2, 5, 53, buf);
+            break;
+        }
+    }
+    return 0;
+}
+
+
 uint8_t render_profile_misc_details(mui_t *ui, uint8_t msg) {
     switch(msg)
     {
@@ -253,6 +316,7 @@ muif_t muif_list[] = {
         MUIF_BUTTON("BN", mui_u8g2_btn_goto_wm_fi),
 
         MUIF_BUTTON("B1", render_charge_mode_next_button),
+        MUIF_BUTTON("B2", render_ai_learn_next_button),
 
         // Leave
         MUIF_VARIABLE("LV", &exit_state, mui_u8g2_btn_exit_wm_fi),
@@ -265,6 +329,12 @@ muif_t muif_list[] = {
 
         // Render version
         MUIF_RO("VE", render_version_page),
+
+        // AI Trickle settings
+        MUIF_VARIABLE("AM", &ai_trickle_data.mode_preset, mui_u8g2_u8_opt_line_wa_mud_pi),
+        MUIF_VARIABLE("AE", &ai_trickle_data.enable, mui_u8g2_u8_opt_line_wa_mud_pi),
+        MUIF_VARIABLE("AL", &ai_trickle_data.auto_learn, mui_u8g2_u8_opt_line_wa_mud_pi),
+        MUIF_RO("AI", render_ai_model_details),
 
         // Render servo gate state
         MUIF_VARIABLE("RB",&servo_gate.gate_state, render_servo_gate_state_with_action),
@@ -297,6 +367,7 @@ fds_t fds_data[] = {
     MUI_STYLE(0)
     MUI_DATA("MU", 
         MUI_10 "Start|"
+        MUI_70 "AI Trickle|"
         MUI_20 "Cleanup|"
         MUI_40 "Wireless|"
         MUI_30 "Settings"
@@ -388,6 +459,128 @@ fds_t fds_data[] = {
     MUI_LABEL(5, 37, "press Next to cleanup")
     MUI_XYAT("BN",14, 59, 1, "Back")
     MUI_XYAT("LV", 115, 59, 5, "Next")  // APP_STATE_ENTER_CLEANUP_MODE
+
+    // Menu 70: AI Trickle
+    MUI_FORM(70)
+    MUI_STYLE(1)
+    MUI_LABEL(5,10, "AI Trickle")
+    MUI_XY("HL", 0,13)
+
+    MUI_STYLE(0)
+    MUI_DATA("MU",
+        MUI_71 "Mode|"
+        MUI_72 "Learn Profile|"
+        MUI_76 "Model Info|"
+        MUI_77 "Reset Model|"
+        MUI_1 "<-Return"  // back to main menu
+    )
+    MUI_XYA("GC", 5, 25, 0) 
+    MUI_XYA("GC", 5, 37, 1) 
+    MUI_XYA("GC", 5, 49, 2) 
+    MUI_XYA("GC", 5, 61, 3)
+
+    // Menu 71: AI mode
+    MUI_FORM(71)
+    MUI_STYLE(1)
+    MUI_LABEL(5,10, "AI Mode")
+    MUI_XY("HL", 0,13)
+
+    MUI_STYLE(0)
+    MUI_LABEL(5,24, "Mode:")
+    MUI_XYAT("AM", 62, 24, 60, "Precision|Balanced|Speed|Custom")
+    MUI_LABEL(5,35, "Adaptive:")
+    MUI_XYAT("AE", 62, 35, 60, "Off|On")
+    MUI_LABEL(5,46, "Auto learn:")
+    MUI_XYAT("AL", 62, 46, 60, "Off|On")
+
+    MUI_XYAT("LV", 64, 59, 12, " OK ")  // APP_STATE_ENTER_AI_APPLY_PRESET
+
+    // Menu 72: Learn profile, select the profile
+    MUI_FORM(72)
+    MUI_STYLE(1)
+    MUI_LABEL(5,10, "Learn: Select Profile")
+    MUI_XY("HL", 0,13)
+
+    MUI_STYLE(0)
+    MUI_XYT("B2",115, 59, "Next")  // Jump to form 73 or 74
+    MUI_XYAT("BN",14, 59, 70, "Back")
+    MUI_XYA("P0", 5, 25, 33)  // Jump to form 33 (profile selection)
+
+    // Menu 73: Learn charge weight (2dp)
+    MUI_FORM(73)
+    MUI_STYLE(1)
+    MUI_LABEL(5,10, "Learn: Charge Weight")
+    MUI_XY("HL", 0,13)
+
+    MUI_STYLE(3)
+    MUI_XY("N3",36, 35)
+    MUI_XY("N2",52, 35)
+    MUI_LABEL(64, 35, ".")
+    MUI_XY("N1",76, 35)
+    MUI_XY("N0",92, 35)
+
+    MUI_STYLE(0)
+    MUI_XYAT("BN",115, 59, 75, "Next")
+    MUI_XYAT("BN",14, 59, 72, "Back")
+
+    MUI_STYLE(3)
+    MUI_XY("N4",20, 35)
+
+    // Menu 74: Learn charge weight (3dp)
+    MUI_FORM(74)
+    MUI_STYLE(1)
+    MUI_LABEL(5,10, "Learn: Charge Weight")
+    MUI_XY("HL", 0,13)
+
+    MUI_STYLE(3)
+    MUI_XY("N3",36, 35)
+    MUI_LABEL(48, 35, ".")
+    MUI_XY("N2",60, 35)
+    MUI_XY("N1",76, 35)
+    MUI_XY("N0",92, 35)
+
+    MUI_STYLE(0)
+    MUI_XYAT("BN",115, 59, 75, "Next")
+    MUI_XYAT("BN",14, 59, 72, "Back")
+
+    MUI_STYLE(3)
+    MUI_XY("N4",20, 35)
+
+    // Menu 75: Learn warning page
+    MUI_FORM(75)
+    MUI_STYLE(1)
+    MUI_LABEL(5, 10, "Learn Profile")
+    MUI_XY("HL", 0,13)
+
+    MUI_STYLE(0)
+    MUI_LABEL(5, 25, "Put pan on the scale.")
+    MUI_LABEL(5, 37, "Empty it after each throw")
+
+    MUI_XYAT("LV", 115, 59, 11, "Next")  // APP_STATE_ENTER_AI_LEARN
+    MUI_XYAT("BN",14, 59, 72, "Back")
+
+    // Menu 76: Model info
+    MUI_FORM(76)
+    MUI_STYLE(1)
+    MUI_LABEL(5,10, "AI Model")
+    MUI_XY("HL", 0,13)
+
+    MUI_AUX("AI")
+
+    MUI_STYLE(0)
+    MUI_XYAT("BN", 64, 63, 70, " OK ")
+
+    // Menu 77: Reset model
+    MUI_FORM(77)
+    MUI_STYLE(1)
+    MUI_LABEL(5,10, "Reset AI Model")
+    MUI_XY("HL", 0,13)
+
+    MUI_STYLE(0)
+    MUI_LABEL(5, 25, "Forget what was learned")
+    MUI_LABEL(5, 37, "for the current profile?")
+    MUI_XYAT("BN",14, 59, 70, "Back")
+    MUI_XYAT("LV", 115, 59, 13, "Next")  // APP_STATE_ENTER_AI_RESET_MODEL
 
     // Menu 30: Configurations
     MUI_FORM(30)

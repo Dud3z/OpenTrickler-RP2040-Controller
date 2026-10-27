@@ -57,6 +57,22 @@ add_custom_command(
 add_dependencies("${TARGET_NAME}" generate_display_mirror)
 
 
+# ai_trickle.html
+add_custom_target(
+    generate_ai_trickle_header ALL
+    DEPENDS "${SRC_DIRECTORY}/generated/ai_trickle.html.h"
+)
+
+add_custom_command(
+    OUTPUT "${SRC_DIRECTORY}/generated/ai_trickle.html.h"
+    DEPENDS "${SRC_DIRECTORY}/html/ai_trickle.html"
+    COMMAND "${Python_EXECUTABLE}" "${SCRIPTS_DIRECTORY}/html2header.py" -vv --no-minify -f ${SRC_DIRECTORY}/html/ai_trickle.html -o ${SRC_DIRECTORY}/generated/ai_trickle.html.h
+    COMMENT "Generating ai_trickle.html header"
+)
+
+add_dependencies("${TARGET_NAME}" generate_ai_trickle_header)
+
+
 # Generate version
 MESSAGE("Python_EXECUTABLE: ${Python_EXECUTABLE}")
 add_custom_command(

@@ -1,0 +1,1234 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>OpenTrickler AI Trickle</title>
+
+    <link href="https://cdn.jsdelivr.net/npm/daisyui@4.7.3/dist/full.min.css" rel="stylesheet" type="text/css" />
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0 viewport-fit=cover">
+    <link rel="icon" href="https://raw.githubusercontent.com/eamars/OpenTrickler/main/Resources/favicon.ico">
+
+    <style>
+        .chart { width: 100%; height: 220px; display: block; }
+        .chat-bubble { white-space: pre-wrap; max-width: 100%; }
+        .mono { font-variant-numeric: tabular-nums; }
+        details > summary { cursor: pointer; }
+    </style>
+</head>
+
+<body>
+<div class="container mx-auto max-w-3xl p-3 grid grid-cols-1 gap-3">
+
+    <!-- Header -->
+    <div class="navbar bg-base-200 rounded-box">
+        <div class="flex-1">
+            <a href="/" class="btn btn-ghost btn-sm">&larr;</a>
+            <span class="text-xl font-bold ml-2">AI Trickle</span>
+        </div>
+        <div class="flex-none gap-2">
+            <select id="langSelect" class="select select-sm select-bordered" onchange="setLanguage(this.value)">
+                <option value="de">DE</option>
+                <option value="en">EN</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Status -->
+    <div class="card bg-base-200">
+        <div class="card-body p-4">
+            <div class="flex justify-between items-center">
+                <h2 class="card-title" data-i18n="status">Status</h2>
+                <span id="modelBadge" class="badge">-</span>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mono">
+                <div class="stat p-2">
+                    <div class="stat-title" data-i18n="profile">Profil</div>
+                    <div id="profileName" class="stat-value text-lg">-</div>
+                </div>
+                <div class="stat p-2">
+                    <div class="stat-title" data-i18n="weight">Gewicht</div>
+                    <div id="currentWeight" class="stat-value text-lg">-</div>
+                    <div id="phaseName" class="stat-desc">-</div>
+                </div>
+                <div class="stat p-2">
+                    <div class="stat-title" data-i18n="predicted">Vorhersage</div>
+                    <div id="predictedWeight" class="stat-value text-lg">-</div>
+                    <div id="targetWeight" class="stat-desc">-</div>
+                </div>
+                <div class="stat p-2">
+                    <div class="stat-title" data-i18n="lastThrow">Letzter Wurf</div>
+                    <div id="lastError" class="stat-value text-lg">-</div>
+                    <div id="lastTime" class="stat-desc">-</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mode -->
+    <div class="card bg-base-200">
+        <div class="card-body p-4">
+            <h2 class="card-title" data-i18n="mode">Modus</h2>
+            <div class="flex justify-between text-sm">
+                <span data-i18n="precision">Genauigkeit</span>
+                <span data-i18n="speed">Geschwindigkeit</span>
+            </div>
+            <input id="levelSlider" type="range" min="0" max="100" value="0" step="5" class="range range-primary" oninput="onLevelInput()"/>
+            <div class="flex justify-between text-xs opacity-70">
+                <span>0</span><span>25</span><span>50</span><span>75</span><span>100</span>
+            </div>
+            <div class="grid grid-cols-2 gap-2 mono text-sm mt-1">
+                <div><span data-i18n="tolerance">Toleranz</span>: <b id="levelTolerance">-</b></div>
+                <div><span data-i18n="estTime">Geschätzte Zeit</span>: <b id="levelTime">-</b></div>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-1 mt-2">
+                <label class="label cursor-pointer justify-start gap-3">
+                    <input id="enableToggle" type="checkbox" class="toggle toggle-primary" />
+                    <span class="label-text" data-i18n="adaptive">Adaptiver Regler</span>
+                </label>
+                <label class="label cursor-pointer justify-start gap-3">
+                    <input id="autoLearnToggle" type="checkbox" class="toggle toggle-primary" />
+                    <span class="label-text" data-i18n="autoLearn">Ständig weiterlernen</span>
+                </label>
+            </div>
+            <div class="card-actions justify-end">
+                <button class="btn btn-primary btn-sm" onclick="saveConfig()" data-i18n="save">Speichern</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Learn -->
+    <div class="card bg-base-200">
+        <div class="card-body p-4">
+            <h2 class="card-title" data-i18n="learn">Profil einlernen</h2>
+            <p class="text-sm opacity-80" data-i18n="learnHelp">-</p>
+            <div class="grid grid-cols-2 gap-2">
+                <label class="form-control">
+                    <div class="label"><span class="label-text" data-i18n="chargeWeight">Ladung (gr)</span></div>
+                    <input id="learnWeight" type="number" step="0.01" min="1" class="input input-bordered input-sm" />
+                </label>
+                <label class="form-control">
+                    <div class="label"><span class="label-text" data-i18n="throws">Würfe</span></div>
+                    <input id="learnThrows" type="number" min="2" max="20" value="8" class="input input-bordered input-sm" />
+                </label>
+            </div>
+            <progress id="learnProgress" class="progress progress-primary w-full mt-2" value="0" max="100"></progress>
+            <div id="learnStatus" class="text-sm">-</div>
+            <div class="card-actions justify-end">
+                <button id="learnStopButton" class="btn btn-sm" onclick="stopLearning()" data-i18n="stop">Stopp</button>
+                <button id="learnStartButton" class="btn btn-primary btn-sm" onclick="startLearning()" data-i18n="startLearning">Lernen starten</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Last throw chart -->
+    <div class="card bg-base-200">
+        <div class="card-body p-4">
+            <h2 class="card-title" data-i18n="lastThrowChart">Letzter Wurf</h2>
+            <canvas id="traceChart" class="chart"></canvas>
+            <div class="flex flex-wrap gap-3 text-xs">
+                <span><span class="inline-block w-3 h-1 bg-primary align-middle"></span> <span data-i18n="measured">Gemessen</span></span>
+                <span><span class="inline-block w-3 h-1 bg-secondary align-middle"></span> <span data-i18n="modelCurve">Modell</span></span>
+                <span><span class="inline-block w-3 h-1 bg-error align-middle"></span> <span data-i18n="target">Ziel</span></span>
+                <span><span class="inline-block w-3 h-1 bg-warning align-middle"></span> <span data-i18n="coarseStop">Grob-Stopp</span></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- History -->
+    <div class="card bg-base-200">
+        <div class="card-body p-4">
+            <div class="flex justify-between items-center">
+                <h2 class="card-title" data-i18n="history">Verlauf</h2>
+                <button class="btn btn-ghost btn-xs" onclick="clearLog()" data-i18n="clearLog">Log leeren</button>
+            </div>
+            <canvas id="errorChart" class="chart"></canvas>
+            <div id="historyStats" class="grid grid-cols-2 sm:grid-cols-4 gap-2 mono text-sm"></div>
+            <div class="overflow-x-auto max-h-64">
+                <table class="table table-xs table-pin-rows mono">
+                    <thead><tr>
+                        <th>#</th><th data-i18n="target">Ziel</th><th data-i18n="final">Ergebnis</th>
+                        <th data-i18n="error">Fehler</th><th data-i18n="time">Zeit</th><th data-i18n="info">Info</th>
+                    </tr></thead>
+                    <tbody id="historyTable"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Model -->
+    <div class="card bg-base-200">
+        <div class="card-body p-4">
+            <h2 class="card-title" data-i18n="model">Gelerntes Pulvermodell</h2>
+            <div class="overflow-x-auto">
+                <table class="table table-sm mono">
+                    <tbody id="modelTable"></tbody>
+                </table>
+            </div>
+            <div class="card-actions justify-end">
+                <button class="btn btn-error btn-outline btn-sm" onclick="resetModel()" data-i18n="resetModel">Modell zurücksetzen</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Claude -->
+    <div class="card bg-base-200">
+        <div class="card-body p-4">
+            <h2 class="card-title" data-i18n="assistant">KI-Assistent (Claude)</h2>
+            <details id="claudeSetup">
+                <summary class="text-sm" data-i18n="apiSetup">API-Schlüssel und Modell</summary>
+                <div class="grid grid-cols-1 gap-2 mt-2">
+                    <input id="apiKeyInput" type="password" placeholder="sk-ant-..." class="input input-bordered input-sm" autocomplete="off" />
+                    <select id="modelSelect" class="select select-bordered select-sm">
+                        <option value="claude-opus-5-5">Claude Opus 5.5</option>
+                        <option value="claude-sonnet-5-5">Claude Sonnet 5.5</option>
+                        <option value="claude-haiku-5-5">Claude Haiku 5.5</option>
+                    </select>
+                    <p class="text-xs opacity-70" data-i18n="apiNote">-</p>
+                    <div class="flex justify-end gap-2">
+                        <button class="btn btn-sm" onclick="forgetApiKey()" data-i18n="forget">Vergessen</button>
+                        <button class="btn btn-primary btn-sm" onclick="saveApiKey()" data-i18n="save">Speichern</button>
+                    </div>
+                </div>
+            </details>
+            <div class="flex flex-wrap gap-2 mt-2">
+                <button class="btn btn-primary btn-sm" onclick="askClaude(t('promptAnalyse'))" data-i18n="analyse">Würfe analysieren</button>
+                <button class="btn btn-outline btn-sm" onclick="askClaude(t('promptOvershoot'))" data-i18n="chipOvershoot">Warum über/unter?</button>
+                <button class="btn btn-outline btn-sm" onclick="askClaude(t('promptFaster'))" data-i18n="chipFaster">Schneller?</button>
+                <button class="btn btn-outline btn-sm" onclick="askPowder()" data-i18n="chipPowder">Neues Pulver</button>
+            </div>
+            <div id="chatLog" class="flex flex-col gap-2 mt-2"></div>
+            <div class="join w-full mt-2">
+                <input id="chatInput" class="input input-bordered input-sm join-item w-full" data-i18n-placeholder="chatPlaceholder" placeholder="Frage stellen..." onkeydown="if (event.key === 'Enter') sendChat()" />
+                <button id="chatSendButton" class="btn btn-primary btn-sm join-item" onclick="sendChat()" data-i18n="send">Senden</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="toast toast-end"></div>
+</div>
+
+<script>
+// ---------------------------------------------------------------------------
+// Translations
+// ---------------------------------------------------------------------------
+const I18N = {
+    de: {
+        status: "Status", profile: "Profil", weight: "Gewicht", predicted: "Vorhersage", lastThrow: "Letzter Wurf",
+        mode: "Modus", precision: "Genauigkeit", speed: "Geschwindigkeit", tolerance: "Toleranz", estTime: "Geschätzte Zeit",
+        adaptive: "Adaptiver Regler", autoLearn: "Ständig weiterlernen", save: "Speichern",
+        learn: "Profil einlernen",
+        learnHelp: "Der Trickler wirft Probe-Pulse und mehrere Ladungen, misst dabei Fördermenge, Fallzeit, Nachlauf und Streuung und stellt sich selbst ein. Leere die Waagschale nach jedem Wurf.",
+        chargeWeight: "Ladung (gr)", throws: "Würfe", stop: "Stopp", startLearning: "Lernen starten",
+        lastThrowChart: "Letzter Wurf", measured: "Gemessen", modelCurve: "Modell (Mittelwerte)", target: "Ziel", coarseStop: "Grob-Stopp",
+        history: "Verlauf", clearLog: "Log leeren", final: "Ergebnis", error: "Fehler", time: "Zeit", info: "Info",
+        model: "Gelerntes Pulvermodell", resetModel: "Modell zurücksetzen",
+        assistant: "KI-Assistent (Claude)", apiSetup: "API-Schlüssel und Modell",
+        apiNote: "Der Schlüssel wird nur in diesem Browser gespeichert und direkt an die Anthropic API gesendet, nie an den Trickler. Dein Gerät braucht dafür Internet (WLAN-Station-Modus).",
+        forget: "Vergessen", analyse: "Würfe analysieren", chipOvershoot: "Warum über/unter?", chipFaster: "Schneller?",
+        chipPowder: "Neues Pulver", chatPlaceholder: "Frage stellen...", send: "Senden",
+        notLearned: "Nicht gelernt", learning: "Lernt", ready: "Bereit", drift: "Abweichung", converged: "Eingelernt",
+        learnIdle: "Kein Lernvorgang aktiv.", learnRunning: "Wurf {done} von {total} – Waagschale nach jedem Wurf leeren.",
+        learnDone: "Fertig eingelernt.", saved: "Gespeichert", applied: "Übernommen", failed: "Fehlgeschlagen",
+        confirmReset: "Gelerntes Modell für dieses Profil wirklich löschen?",
+        noKey: "Bitte zuerst einen Anthropic API-Schlüssel eintragen.",
+        enterWeight: "Bitte eine Ladung in grain eingeben.",
+        statMean: "Mittel", statSd: "Streuung", statIn: "In Toleranz", statTime: "Ø Zeit",
+        apply: "Übernehmen", proposal: "Vorschlag", applyAll: "Alle übernehmen",
+        thinking: "Claude denkt nach...", refusal: "Claude hat die Anfrage abgelehnt.",
+        authError: "API-Schlüssel ungültig.", rateError: "Rate-Limit erreicht, bitte kurz warten.",
+        netError: "Keine Verbindung zur Anthropic API. Hat dieses Gerät Internet?",
+        powderQuestion: "Welches Pulver (Name, Form wenn bekannt)?",
+        promptAnalyse: "Analysiere bitte meine letzten Würfe und das gelernte Modell. Was läuft gut, was nicht, und welche konkreten Einstellungen würdest du ändern?",
+        promptOvershoot: "Warum liegen manche Würfe über und andere unter dem Ziel? Erkläre es anhand meiner Daten.",
+        promptFaster: "Wie kann ich schneller werden, ohne mehr Würfe außerhalb der Toleranz zu bekommen?",
+        promptPowder: "Ich wechsle auf das Pulver: {powder}. Worauf muss ich beim Trickler achten und mit welchem Modus/Einstellungen sollte ich das Einlernen beginnen?",
+        throwFlags: {adaptive: "AI", learn: "Lernen", probe: "Probe", fault: "Fehler", topups: "Nachtrickeln"},
+        modelRows: {
+            n: "Gelernte Würfe", kc: "Grob: gr pro Umdrehung", kf: "Fein: gr pro Umdrehung", lat: "Verzögerung (Fall + Waage)",
+            tl: "Nachlauf Grob-Motor", tsd: "Streuung Nachlauf", tau: "Nachlauf-Zeitkonstante", cv: "Fluss-Schwankung",
+            bias: "Stopp-Korrektur", lsd: "Streuung beim Stopp", fm: "Mittlerer Fehler", fsd: "Streuung Endgewicht", mt: "Mittlere Zeit",
+        },
+    },
+    en: {
+        status: "Status", profile: "Profile", weight: "Weight", predicted: "Predicted", lastThrow: "Last throw",
+        mode: "Mode", precision: "Precision", speed: "Speed", tolerance: "Tolerance", estTime: "Estimated time",
+        adaptive: "Adaptive controller", autoLearn: "Keep learning", save: "Save",
+        learn: "Learn profile",
+        learnHelp: "The trickler throws probe pulses and several charges, measures flow per revolution, flight time, tail and spread, and tunes itself. Empty the pan after each throw.",
+        chargeWeight: "Charge (gr)", throws: "Throws", stop: "Stop", startLearning: "Start learning",
+        lastThrowChart: "Last throw", measured: "Measured", modelCurve: "Model (average)", target: "Target", coarseStop: "Coarse stop",
+        history: "History", clearLog: "Clear log", final: "Result", error: "Error", time: "Time", info: "Info",
+        model: "Learned powder model", resetModel: "Reset model",
+        assistant: "AI assistant (Claude)", apiSetup: "API key and model",
+        apiNote: "The key is stored in this browser only and sent directly to the Anthropic API, never to the trickler. This device needs internet access (WiFi station mode).",
+        forget: "Forget", analyse: "Analyse throws", chipOvershoot: "Why over/under?", chipFaster: "Faster?",
+        chipPowder: "New powder", chatPlaceholder: "Ask a question...", send: "Send",
+        notLearned: "Not learned", learning: "Learning", ready: "Ready", drift: "Drift", converged: "Learned",
+        learnIdle: "No learning session.", learnRunning: "Throw {done} of {total} - empty the pan after each throw.",
+        learnDone: "Learning complete.", saved: "Saved", applied: "Applied", failed: "Failed",
+        confirmReset: "Really delete the learned model for this profile?",
+        noKey: "Please enter an Anthropic API key first.",
+        enterWeight: "Please enter a charge weight in grain.",
+        statMean: "Mean", statSd: "Spread", statIn: "In tolerance", statTime: "Avg time",
+        apply: "Apply", proposal: "Proposal", applyAll: "Apply all",
+        thinking: "Claude is thinking...", refusal: "Claude declined the request.",
+        authError: "Invalid API key.", rateError: "Rate limited, please wait a moment.",
+        netError: "Cannot reach the Anthropic API. Does this device have internet?",
+        powderQuestion: "Which powder (name, shape if known)?",
+        promptAnalyse: "Please analyse my recent throws and the learned model. What works, what doesn't, and which concrete settings would you change?",
+        promptOvershoot: "Why are some throws above and others below the target? Explain it using my data.",
+        promptFaster: "How can I get faster without more throws outside the tolerance?",
+        promptPowder: "I am switching to the powder: {powder}. What should I watch out for with the trickler, and which mode/settings should I start learning with?",
+        throwFlags: {adaptive: "AI", learn: "Learn", probe: "Probe", fault: "Fault", topups: "Top ups"},
+        modelRows: {
+            n: "Learned throws", kc: "Coarse: gr per revolution", kf: "Fine: gr per revolution", lat: "Latency (flight + scale)",
+            tl: "Coarse tail", tsd: "Tail spread", tau: "Tail time constant", cv: "Flow fluctuation",
+            bias: "Stop correction", lsd: "Spread at stop", fm: "Mean error", fsd: "Final spread", mt: "Mean time",
+        },
+    },
+};
+
+let lang = "de";
+try {
+    lang = localStorage.getItem("aiLang") || ((navigator.language || "de").toLowerCase().startsWith("de") ? "de" : "en");
+} catch (e) {}
+
+function t(key, vars) {
+    let s = (I18N[lang] && I18N[lang][key]) || I18N.en[key] || key;
+    if (vars) {
+        for (const k in vars) {
+            s = s.replace("{" + k + "}", vars[k]);
+        }
+    }
+    return s;
+}
+
+function setLanguage(newLang) {
+    lang = newLang;
+    try { localStorage.setItem("aiLang", lang); } catch (e) {}
+    document.documentElement.lang = lang;
+    document.querySelectorAll("[data-i18n]").forEach(el => { el.textContent = t(el.dataset.i18n); });
+    document.querySelectorAll("[data-i18n-placeholder]").forEach(el => { el.placeholder = t(el.dataset.i18nPlaceholder); });
+    document.getElementById("langSelect").value = lang;
+    renderAll();
+}
+
+// ---------------------------------------------------------------------------
+// Device state
+// ---------------------------------------------------------------------------
+const FLAG_ADAPTIVE = 1, FLAG_LEARN = 2, FLAG_PROBE = 4, FLAG_FAULT = 8;
+const LOG_KEY = "aiThrowLog";
+const LOG_MAX = 300;
+
+const state = {
+    config: null,
+    model: null,
+    status: null,
+    trace: null,
+    profile: null,
+    chargeConfig: null,
+    lastSeq: 0,
+    log: loadLog(),
+};
+
+function loadLog() {
+    try { return JSON.parse(localStorage.getItem(LOG_KEY) || "[]"); } catch (e) { return []; }
+}
+
+function saveLog() {
+    try { localStorage.setItem(LOG_KEY, JSON.stringify(state.log.slice(-LOG_MAX))); } catch (e) {}
+}
+
+function clearLog() {
+    state.log = [];
+    saveLog();
+    renderHistory();
+}
+
+async function getJson(url) {
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error(url + ": " + response.status);
+    }
+    return response.json();
+}
+
+function toast(text, kind) {
+    const el = document.createElement("div");
+    el.className = "alert " + (kind === "error" ? "alert-error" : "alert-success");
+    el.textContent = text;
+    document.getElementById("toast").appendChild(el);
+    setTimeout(() => el.remove(), 3000);
+}
+
+function fmt(v, digits) {
+    return (v === null || v === undefined || Number.isNaN(v)) ? "-" : Number(v).toFixed(digits);
+}
+
+function signed(v, digits) {
+    if (v === null || v === undefined || Number.isNaN(v)) return "-";
+    return (v >= 0 ? "+" : "") + Number(v).toFixed(digits);
+}
+
+async function refreshConfig() {
+    state.config = await getJson("/rest/ai_config");
+    state.model = await getJson("/rest/ai_model?pf=" + state.config.pf);
+    renderConfig();
+    renderModel();
+}
+
+async function refreshDeviceSettings() {
+    // Profile and charge mode settings: speed limits for the estimate, context for Claude
+    try {
+        state.profile = await getJson("/rest/profile_config?pf=" + (state.config ? state.config.pf : 0));
+        state.chargeConfig = await getJson("/rest/charge_mode_config");
+    } catch (e) {
+        console.warn(e);
+    }
+}
+
+async function refreshHistory() {
+    const data = await getJson("/rest/ai_history?since=" + state.lastSeq);
+    for (const h of data.h) {
+        const entry = {
+            seq: h[0], pf: h[1], target: h[2], final: h[3], landing: h[4], time: h[5],
+            topups: h[6], flags: h[7], level: h[8], profile: state.config ? state.config.pn : "", ts: Date.now(),
+        };
+        // Avoid duplicates after a page reload (the sequence restarts on reboot)
+        if (!state.log.some(e => e.seq === entry.seq && e.target === entry.target && e.final === entry.final)) {
+            state.log.push(entry);
+        }
+    }
+    state.lastSeq = data.seq;
+    saveLog();
+    renderHistory();
+}
+
+async function refreshTrace() {
+    state.trace = await getJson("/rest/ai_trace");
+    renderTrace();
+}
+
+let pollCounter = 0;
+let lastStatusSeq = -1;
+
+async function poll() {
+    try {
+        state.status = await getJson("/rest/ai_status");
+        renderStatus();
+
+        const s = state.status;
+        if (s.seq !== lastStatusSeq) {
+            lastStatusSeq = s.seq;
+            await refreshHistory();
+            await refreshTrace();
+            await refreshConfig();
+        }
+        else if (s.ar && (pollCounter % 2 === 0)) {
+            // Live trace while charging
+            await refreshTrace();
+        }
+        pollCounter += 1;
+    } catch (e) {
+        console.warn(e);
+    }
+    setTimeout(poll, 1000);
+}
+
+// ---------------------------------------------------------------------------
+// Mode helpers (mirror trickle_mode_params_from_level / estimate_time)
+// ---------------------------------------------------------------------------
+function modeParams(level) {
+    const x = Math.min(Math.max(level / 100, 0), 1);
+    const g = (a, b) => a * Math.pow(b / a, x);
+    const l = (a, b) => a + (b - a) * x;
+    return {
+        tolerance: g(0.02, 0.10),
+        approach: g(1.6, 0.3),
+        reserve: g(2.0, 0.5),
+        sigma: l(3.0, 2.0),
+    };
+}
+
+// Model based estimate, calibrated with the learned mean charge time when available
+function estimateTime(level) {
+    const raw = estimateTimeRaw(level);
+    const m = state.model;
+    if (raw === null || !m || !(m.mt > 0) || !state.config) return raw;
+    const current = estimateTimeRaw(state.config.a1);
+    const factor = current ? Math.min(Math.max(m.mt / current, 0.5), 3) : 1;
+    return raw * factor;
+}
+
+function estimateTimeRaw(level) {
+    const m = state.model;
+    const p = state.profile;
+    if (!m || !p || !state.config || !state.config.rd) return null;
+    const mode = modeParams(level);
+    const target = state.config.tg || 40;
+    const coarseFlow = m.kc * p.p7 + m.kf * p.p12;
+    const fineMax = m.kf * p.p12;
+    const fineMin = m.kf * p.p11;
+    const coarsePart = Math.max(0, target - mode.reserve);
+    let time = coarseFlow > 0 ? coarsePart / coarseFlow : 0;
+    // Approach time is limited by the flow fluctuation, see ctrl_min_approach_time()
+    const zcv = (mode.sigma + 1) * 1.25 * m.cv;
+    const minApproach = m.lat / Math.log(1 + 1 / zcv);
+    const approach = Math.max(mode.approach, minApproach);
+    let remaining = target - coarsePart;
+    for (let i = 0; i < 4000 && remaining > 0; i += 1) {
+        const q = Math.min(Math.max(remaining / approach, fineMin), fineMax);
+        if (remaining <= q * m.lat) break;
+        remaining -= q * 0.05;
+        time += 0.05;
+    }
+    return time + m.lat + 0.6;
+}
+
+function onLevelInput() {
+    const level = Number(document.getElementById("levelSlider").value);
+    document.getElementById("levelTolerance").textContent = "±" + modeParams(level).tolerance.toFixed(3) + " gr";
+    const est = estimateTime(level);
+    document.getElementById("levelTime").textContent = est ? "≈ " + est.toFixed(0) + " s" : "-";
+}
+
+async function saveConfig() {
+    const level = document.getElementById("levelSlider").value;
+    const enable = document.getElementById("enableToggle").checked;
+    const auto = document.getElementById("autoLearnToggle").checked;
+    try {
+        await getJson(`/rest/ai_config?a0=${enable}&a1=${level}&a2=${auto}&ee=true`);
+        await refreshConfig();
+        toast(t("saved"));
+    } catch (e) {
+        toast(t("failed"), "error");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Learning
+// ---------------------------------------------------------------------------
+async function startLearning() {
+    const weight = parseFloat(String(document.getElementById("learnWeight").value).replace(",", "."));
+    const throws = parseInt(document.getElementById("learnThrows").value, 10) || 8;
+    if (!(weight > 0)) {
+        toast(t("enterWeight"), "error");
+        return;
+    }
+    try {
+        await getJson(`/rest/ai_config?a3=${throws}&ee=true`);
+        await getJson(`/rest/ai_learn?s0=${encodeURIComponent(weight)}&n=${throws}&go=true`);
+        toast(t("saved"));
+    } catch (e) {
+        toast(t("failed"), "error");
+    }
+}
+
+async function stopLearning() {
+    try {
+        await getJson("/rest/ai_learn?stop=true");
+    } catch (e) {
+        toast(t("failed"), "error");
+    }
+}
+
+async function resetModel() {
+    if (!state.config || !confirm(t("confirmReset"))) return;
+    await getJson(`/rest/ai_model?pf=${state.config.pf}&rst=true&ee=true`);
+    await refreshConfig();
+}
+
+// ---------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------
+function renderAll() {
+    renderConfig();
+    renderStatus();
+    renderModel();
+    renderHistory();
+    renderTrace();
+}
+
+function modelState() {
+    const m = state.model;
+    const s = state.status;
+    if (s && s.la) return {text: t("learning") + ` ${s.ld}/${s.lt}`, cls: "badge-info"};
+    if (!m || !(m.fl & 1)) return {text: t("notLearned"), cls: "badge-ghost"};
+    if (m.fl & 4) return {text: t("drift"), cls: "badge-warning"};
+    if (m.fl & 2) return {text: t("converged"), cls: "badge-success"};
+    return {text: t("ready"), cls: "badge-success"};
+}
+
+function renderBadge() {
+    const badge = modelState();
+    const el = document.getElementById("modelBadge");
+    el.className = "badge " + badge.cls;
+    el.textContent = badge.text;
+}
+
+function renderConfig() {
+    const c = state.config;
+    if (!c) return;
+    document.getElementById("profileName").textContent = c.pn;
+    const slider = document.getElementById("levelSlider");
+    if (document.activeElement !== slider) slider.value = c.a1;
+    document.getElementById("enableToggle").checked = c.a0;
+    document.getElementById("autoLearnToggle").checked = c.a2;
+    const learnThrows = document.getElementById("learnThrows");
+    if (document.activeElement !== learnThrows) learnThrows.value = c.a3;
+    const learnWeight = document.getElementById("learnWeight");
+    if (!learnWeight.value && c.tg > 0) learnWeight.value = c.tg.toFixed(2);
+    onLevelInput();
+    renderBadge();
+}
+
+function renderStatus() {
+    const s = state.status;
+    if (!s) return;
+    document.getElementById("currentWeight").textContent = fmt(s.w, 2);
+    document.getElementById("phaseName").textContent = s.ar ? s.pn : "-";
+    document.getElementById("predictedWeight").textContent = s.ar ? fmt(s.pr, 2) : "-";
+    document.getElementById("targetWeight").textContent = t("target") + " " + fmt(s.tg, 2);
+
+    const tol = state.config ? state.config.tol : 0.02;
+    const errEl = document.getElementById("lastError");
+    errEl.textContent = signed(s.le, 3);
+    errEl.className = "stat-value text-lg " + (s.le === null ? "" : (Math.abs(s.le) <= tol + 1e-4 ? "text-success" : (s.le > 0 ? "text-error" : "text-warning")));
+    const last = state.log.length ? state.log[state.log.length - 1] : null;
+    document.getElementById("lastTime").textContent = last ? fmt(last.time, 1) + " s" : "-";
+
+    const progress = document.getElementById("learnProgress");
+    const status = document.getElementById("learnStatus");
+    if (s.la) {
+        progress.value = s.lt ? (100 * s.ld / s.lt) : 0;
+        status.textContent = t("learnRunning", {done: s.ld + 1, total: s.lt});
+    } else if (s.lc) {
+        progress.value = 100;
+        status.textContent = t("learnDone");
+    } else {
+        progress.value = 0;
+        status.textContent = t("learnIdle");
+    }
+    renderBadge();
+}
+
+function renderModel() {
+    const m = state.model;
+    if (!m) return;
+    const rows = I18N[lang].modelRows;
+    const values = {
+        n: m.n, kc: fmt(m.kc, 3), kf: fmt(m.kf, 4), lat: fmt(m.lat, 2) + " s",
+        tl: fmt(m.tl, 2) + " gr", tsd: fmt(m.tsd, 2) + " gr", tau: fmt(m.tau, 2) + " s", cv: fmt(m.cv * 100, 0) + " %",
+        bias: signed(m.bias, 3) + " gr", lsd: fmt(m.lsd, 3) + " gr", fm: signed(m.fm, 3) + " gr", fsd: fmt(m.fsd, 3) + " gr",
+        mt: fmt(m.mt, 1) + " s",
+    };
+    document.getElementById("modelTable").innerHTML = Object.keys(rows)
+        .map(k => `<tr><td>${rows[k]}</td><td class="text-right">${values[k]}</td></tr>`).join("");
+}
+
+function profileLog() {
+    const pn = state.config ? state.config.pn : null;
+    return state.log.filter(e => !pn || e.profile === pn);
+}
+
+function renderHistory() {
+    const entries = profileLog();
+    const tol = state.config ? state.config.tol : 0.02;
+    const flags = I18N[lang].throwFlags;
+
+    document.getElementById("historyTable").innerHTML = entries.slice(-50).reverse().map(e => {
+        const err = e.final === null ? null : e.final - e.target;
+        const cls = err === null ? "" : (Math.abs(err) <= tol + 1e-4 ? "text-success" : (err > 0 ? "text-error" : "text-warning"));
+        const info = [];
+        if (e.flags & FLAG_ADAPTIVE) info.push(flags.adaptive);
+        if (e.flags & FLAG_LEARN) info.push(flags.learn);
+        if (e.flags & FLAG_PROBE) info.push(flags.probe);
+        if (e.flags & FLAG_FAULT) info.push(flags.fault);
+        if (e.topups) info.push(flags.topups + " " + e.topups);
+        return `<tr><td>${e.seq}</td><td>${fmt(e.target, 2)}</td><td>${fmt(e.final, 3)}</td>` +
+               `<td class="${cls}">${signed(err, 3)}</td><td>${fmt(e.time, 1)}</td><td>${info.join(", ")}</td></tr>`;
+    }).join("");
+
+    // Statistics over the last 20 adaptive throws without faults or probes
+    const recent = entries.filter(e => (e.flags & FLAG_ADAPTIVE) && !(e.flags & (FLAG_FAULT | FLAG_PROBE)) && e.final !== null).slice(-20);
+    const errs = recent.map(e => e.final - e.target);
+    const n = errs.length;
+    const mean = n ? errs.reduce((a, b) => a + b, 0) / n : null;
+    const sd = n > 1 ? Math.sqrt(errs.reduce((a, b) => a + (b - mean) * (b - mean), 0) / (n - 1)) : null;
+    const within = n ? 100 * errs.filter(e => Math.abs(e) <= tol + 1e-4).length / n : null;
+    const time = n ? recent.reduce((a, e) => a + e.time, 0) / n : null;
+    document.getElementById("historyStats").innerHTML =
+        `<div>${t("statMean")}: <b>${signed(mean, 3)}</b></div>` +
+        `<div>${t("statSd")}: <b>${fmt(sd, 3)}</b></div>` +
+        `<div>${t("statIn")}: <b>${within === null ? "-" : within.toFixed(0) + " %"}</b></div>` +
+        `<div>${t("statTime")}: <b>${fmt(time, 1)} s</b></div>`;
+
+    drawErrorChart(entries.slice(-60), tol);
+}
+
+// ---------------------------------------------------------------------------
+// Charts (plain canvas, no external library)
+// ---------------------------------------------------------------------------
+function themeColor(cls) {
+    const probe = document.createElement("span");
+    probe.className = cls;
+    probe.style.display = "none";
+    document.body.appendChild(probe);
+    const color = getComputedStyle(probe).color;
+    probe.remove();
+    return color;
+}
+
+function setupCanvas(canvas) {
+    const ratio = window.devicePixelRatio || 1;
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    canvas.width = w * ratio;
+    canvas.height = h * ratio;
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    return {ctx, w, h};
+}
+
+function drawAxes(ctx, area, xr, yr, xLabel, yDigits) {
+    const text = themeColor("text-base-content");
+    ctx.strokeStyle = text;
+    ctx.globalAlpha = 0.15;
+    ctx.lineWidth = 1;
+    ctx.fillStyle = text;
+    ctx.font = "10px sans-serif";
+    for (let i = 0; i <= 4; i += 1) {
+        const y = area.y + area.h - i * area.h / 4;
+        ctx.beginPath();
+        ctx.moveTo(area.x, y);
+        ctx.lineTo(area.x + area.w, y);
+        ctx.stroke();
+    }
+    ctx.globalAlpha = 0.7;
+    for (let i = 0; i <= 4; i += 1) {
+        const v = yr[0] + i * (yr[1] - yr[0]) / 4;
+        ctx.fillText(v.toFixed(yDigits), 2, area.y + area.h - i * area.h / 4 + 3);
+        const xv = xr[0] + i * (xr[1] - xr[0]) / 4;
+        ctx.fillText(xv.toFixed(0) + xLabel, area.x + i * area.w / 4 - 6, area.y + area.h + 12);
+    }
+    ctx.globalAlpha = 1;
+}
+
+function drawLine(ctx, area, xr, yr, xs, ys, color, width, dash) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.setLineDash(dash || []);
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i < xs.length; i += 1) {
+        if (ys[i] === null || Number.isNaN(ys[i])) continue;
+        const x = area.x + (xs[i] - xr[0]) / ((xr[1] - xr[0]) || 1) * area.w;
+        const y = area.y + area.h - (Math.min(Math.max(ys[i], yr[0]), yr[1]) - yr[0]) / ((yr[1] - yr[0]) || 1) * area.h;
+        if (!started) { ctx.moveTo(x, y); started = true; } else { ctx.lineTo(x, y); }
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+}
+
+// Model prediction for the trace, same formula as trickle_model.h
+function modelCurve(trace, m) {
+    const p = trace.p;
+    const at = (tq) => {
+        if (tq <= 0 || p.length === 0) return [0, 0];
+        let i = 0;
+        while (i + 1 < p.length && p[i + 1][0] < tq) i += 1;
+        if (i + 1 >= p.length) return [p[p.length - 1][2], p[p.length - 1][3]];
+        const a = p[i], b = p[i + 1];
+        const f = b[0] > a[0] ? (tq - a[0]) / (b[0] - a[0]) : 0;
+        return [a[2] + (b[2] - a[2]) * f, a[3] + (b[3] - a[3]) * f];
+    };
+    return p.map(s => {
+        const td = s[0] - m.lat;
+        const [rc, rf] = at(td);
+        let tail = 0;
+        for (const cs of trace.cs) {
+            const dt = td - cs;
+            if (dt > 0) tail += 1 - Math.exp(-dt / m.tau);
+        }
+        return m.kc * rc + m.kf * rf + m.tl * tail;
+    });
+}
+
+function renderTrace() {
+    const canvas = document.getElementById("traceChart");
+    const {ctx, w, h} = setupCanvas(canvas);
+    const trace = state.trace;
+    if (!trace || !trace.p || trace.p.length < 2) return;
+
+    const xs = trace.p.map(s => s[0]);
+    const ys = trace.p.map(s => s[1]);
+    const target = state.status ? state.status.tg : Math.max(...ys);
+    const yMax = Math.max(target, ...ys) * 1.05 || 1;
+    const xr = [0, Math.max(...xs)];
+    const yr = [0, yMax];
+    const area = {x: 34, y: 6, w: w - 40, h: h - 24};
+
+    drawAxes(ctx, area, xr, yr, "s", 0);
+    drawLine(ctx, area, xr, yr, [xr[0], xr[1]], [target, target], themeColor("text-error"), 1, [4, 3]);
+    for (const cs of trace.cs) {
+        drawLine(ctx, area, xr, yr, [cs, cs], [0, yMax], themeColor("text-warning"), 1, [2, 3]);
+    }
+    if (state.model && (state.model.fl & 1)) {
+        drawLine(ctx, area, xr, yr, xs, modelCurve(trace, state.model), themeColor("text-secondary"), 1.5, [5, 3]);
+    }
+    drawLine(ctx, area, xr, yr, xs, ys, themeColor("text-primary"), 2);
+}
+
+function drawErrorChart(entries, tol) {
+    const canvas = document.getElementById("errorChart");
+    const {ctx, w, h} = setupCanvas(canvas);
+    const pts = entries.filter(e => e.final !== null).map((e, i) => [i, e.final - e.target, e]);
+    if (!pts.length) return;
+    const lim = Math.max(tol * 3, ...pts.map(p => Math.abs(p[1]))) * 1.1;
+    const xr = [0, Math.max(pts.length - 1, 1)];
+    const yr = [-lim, lim];
+    const area = {x: 40, y: 6, w: w - 46, h: h - 24};
+    drawAxes(ctx, area, xr, yr, "", 2);
+
+    // Tolerance band
+    const yOf = v => area.y + area.h - (v - yr[0]) / (yr[1] - yr[0]) * area.h;
+    ctx.fillStyle = themeColor("text-success");
+    ctx.globalAlpha = 0.12;
+    ctx.fillRect(area.x, yOf(tol), area.w, yOf(-tol) - yOf(tol));
+    ctx.globalAlpha = 1;
+    drawLine(ctx, area, xr, yr, [xr[0], xr[1]], [0, 0], themeColor("text-base-content"), 1, [3, 3]);
+
+    const success = themeColor("text-success");
+    const over = themeColor("text-error");
+    const under = themeColor("text-warning");
+    for (const [i, err, e] of pts) {
+        const x = area.x + (i - xr[0]) / (xr[1] - xr[0]) * area.w;
+        const y = yOf(Math.min(Math.max(err, yr[0]), yr[1]));
+        ctx.fillStyle = Math.abs(err) <= tol + 1e-4 ? success : (err > 0 ? over : under);
+        ctx.beginPath();
+        if (e.flags & FLAG_ADAPTIVE) {
+            ctx.arc(x, y, 3.5, 0, 2 * Math.PI);
+        } else {
+            ctx.rect(x - 3, y - 3, 6, 6);
+        }
+        ctx.fill();
+    }
+}
+
+window.addEventListener("resize", () => { renderTrace(); renderHistory(); });
+
+// ---------------------------------------------------------------------------
+// Claude assistant
+// ---------------------------------------------------------------------------
+const API_KEY_STORE = "aiAnthropicKey";
+const MODEL_STORE = "aiClaudeModel";
+
+// Settings Claude may propose, with the REST endpoint and sane bounds.
+// The firmware sanitizes again on its side.
+const ALLOWED_SETTINGS = {
+    precision_level:                  {api: "ai_config", key: "a1", min: 0, max: 100},
+    model_coarse_gpr:                 {api: "ai_model", key: "kc", min: 0.01, max: 50},
+    model_fine_gpr:                   {api: "ai_model", key: "kf", min: 0.001, max: 5},
+    model_latency_s:                  {api: "ai_model", key: "lat", min: 0.05, max: 3},
+    model_coarse_tail_gr:             {api: "ai_model", key: "tl", min: -2, max: 5},
+    model_coarse_tail_sd_gr:          {api: "ai_model", key: "tsd", min: 0.01, max: 5},
+    model_flow_cv:                    {api: "ai_model", key: "cv", min: 0.02, max: 1},
+    model_stop_bias_gr:               {api: "ai_model", key: "bias", min: -1, max: 1},
+    profile_coarse_min_rps:           {api: "profile", key: "p6", min: 0.01, max: 10},
+    profile_coarse_max_rps:           {api: "profile", key: "p7", min: 0.1, max: 30},
+    profile_fine_min_rps:             {api: "profile", key: "p11", min: 0.01, max: 5},
+    profile_fine_max_rps:             {api: "profile", key: "p12", min: 0.1, max: 30},
+    profile_coarse_kp:                {api: "profile", key: "p3", min: 0, max: 10},
+    profile_coarse_kd:                {api: "profile", key: "p5", min: 0, max: 100},
+    profile_fine_kp:                  {api: "profile", key: "p8", min: 0, max: 50},
+    profile_fine_kd:                  {api: "profile", key: "p10", min: 0, max: 200},
+    classic_coarse_stop_threshold_gr: {api: "charge_mode", key: "c5", min: 0, max: 20},
+    classic_fine_stop_threshold_gr:   {api: "charge_mode", key: "c6", min: 0, max: 1},
+    coarse_backoff_turns:             {api: "charge_mode", key: "c15", min: 0, max: 1},
+};
+
+const PROPOSE_TOOL = {
+    name: "propose_settings",
+    description: "Show the user a set of concrete setting changes for their trickler, each with a short reason. " +
+                 "The user reviews them and applies them with a button; nothing changes on the device until they do. " +
+                 "Only use keys from the enum. Call it at most once per answer, after you explained your reasoning.",
+    strict: true,
+    eager_input_streaming: true,
+    input_schema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+            summary: {type: "string", description: "One sentence: what the changes achieve."},
+            changes: {
+                type: "array",
+                items: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                        setting: {type: "string", enum: Object.keys(ALLOWED_SETTINGS)},
+                        value: {type: "number"},
+                        reason: {type: "string"},
+                    },
+                    required: ["setting", "value", "reason"],
+                },
+            },
+        },
+        required: ["summary", "changes"],
+    },
+};
+
+function systemPrompt() {
+    const language = lang === "de" ? "German" : "English";
+    return `You are the built-in assistant of an OpenTrickler, an automatic powder trickler for ammunition reloading
+(two stepper-driven trickler tubes, coarse and fine, dispensing powder onto a lab scale such as an A&D FX-i).
+You help the user tune the machine: accuracy, speed, consistency. Answer in ${language}, concise and concrete,
+with numbers from their data. Use short paragraphs or bullet points; no headings.
+
+How the "AI Trickle" controller works:
+- It learns a model per powder profile: W(t) = kc*Rc(t-lat) + kf*Rf(t-lat) + tail*T(t), where Rc/Rf are cumulative
+  revolutions of the coarse/fine tube (kc/kf = grains per revolution), lat = powder flight time plus scale response,
+  tail = powder that keeps dropping after the coarse tube stops (rising with time constant tau).
+- From this it predicts the powder still "in flight" and stops early. The approach slows down so that a flow surge of
+  z * flow_cv cannot overshoot (z depends on the precision level). flow_cv is the measured flow fluctuation over one
+  latency window; clumpy stick powders have a high value.
+- After the main stop it waits for the scale to settle and tops up with slow fine pulses if it is short.
+  It deliberately aims slightly below target in precision mode (over charges cannot be undone).
+- stop_bias is an integral correction learned from where throws land; landing_sd is the spread at that point.
+- precision_level 0 = maximum precision (tolerance 0.02 gr), 100 = maximum speed (tolerance 0.10 gr).
+- Learning sessions start with probe pulses (separate short bursts of each tube) to identify the model.
+- Profile min/max speeds (rps) bound the motors in both the adaptive and the classic PID controller.
+  Profile PID gains and classic thresholds only matter when the adaptive controller is off.
+- The scale resolution is typically 0.02 gr, a single kernel of extruded powder weighs about 0.01-0.04 gr, so
+  tolerances below one kernel weight are physically impossible for that powder.
+
+Data you get: device settings, the learned model, the last ~60 throws (target, final weight, landing weight before
+top ups, time, number of top ups, flags) and the weight trace of the last throw. Throw flags: 1 adaptive, 2 learning
+session, 4 probe pulses (extra powder, ignore for accuracy), 8 fault (e.g. empty hopper).
+
+Rules:
+- You tune the machine only. Never recommend powder charge weights or load data and never comment on whether a
+  charge is safe for a cartridge; refer the user to published load manuals for that.
+- Base conclusions on the data. If there are too few throws, say so and suggest a learning session.
+- When you recommend changing settings, call propose_settings once with all changes. Prefer small, explainable
+  steps. Learned model values normally adapt by themselves; only override them for a clear reason.
+- Hardware hints (tube cleaning, static, hopper level, scale draft shield, vibration) are welcome when the data
+  points to them.`;
+}
+
+function compactContext() {
+    const entries = profileLog().slice(-60).map(e => ({
+        seq: e.seq, target: e.target, final: e.final, landing: e.landing, time_s: e.time,
+        topups: e.topups, flags: e.flags, level: e.level,
+    }));
+    let trace = null;
+    if (state.trace && state.trace.p) {
+        const step = Math.max(1, Math.ceil(state.trace.p.length / 80));
+        trace = {
+            coarse_stops_s: state.trace.cs,
+            columns: ["t_s", "weight_gr", "coarse_revs", "fine_revs"],
+            points: state.trace.p.filter((_, i) => i % step === 0),
+        };
+    }
+    return {
+        ai_config: state.config,
+        learned_model: state.model,
+        profile: state.profile,
+        classic_charge_mode_config: state.chargeConfig,
+        status: state.status,
+        throws: entries,
+        last_throw_trace: trace,
+    };
+}
+
+let anthropicModule = null;
+let conversation = [];
+let claudeBusy = false;
+
+async function loadSdk() {
+    if (!anthropicModule) {
+        anthropicModule = await import("https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@0.133.0/+esm");
+    }
+    return anthropicModule;
+}
+
+function apiKey() {
+    try { return localStorage.getItem(API_KEY_STORE) || ""; } catch (e) { return ""; }
+}
+
+function selectedModel() {
+    try { return localStorage.getItem(MODEL_STORE) || "claude-opus-5-5"; } catch (e) { return "claude-opus-5-5"; }
+}
+
+function saveApiKey() {
+    const key = document.getElementById("apiKeyInput").value.trim();
+    const model = document.getElementById("modelSelect").value;
+    try {
+        if (key) localStorage.setItem(API_KEY_STORE, key);
+        localStorage.setItem(MODEL_STORE, model);
+    } catch (e) {}
+    document.getElementById("apiKeyInput").value = "";
+    document.getElementById("apiKeyInput").placeholder = apiKey() ? "••••••••" : "sk-ant-...";
+    document.getElementById("claudeSetup").open = false;
+    toast(t("saved"));
+}
+
+function forgetApiKey() {
+    try { localStorage.removeItem(API_KEY_STORE); } catch (e) {}
+    document.getElementById("apiKeyInput").placeholder = "sk-ant-...";
+    toast(t("saved"));
+}
+
+function addBubble(role, text) {
+    const wrap = document.createElement("div");
+    wrap.className = "chat " + (role === "user" ? "chat-end" : "chat-start");
+    const bubble = document.createElement("div");
+    bubble.className = "chat-bubble " + (role === "user" ? "chat-bubble-primary" : "");
+    bubble.textContent = text;
+    wrap.appendChild(bubble);
+    document.getElementById("chatLog").appendChild(wrap);
+    return bubble;
+}
+
+function validateProposal(input) {
+    if (!input || typeof input !== "object" || !Array.isArray(input.changes) || typeof input.summary !== "string") {
+        return "changes must be an array and summary a string";
+    }
+    for (const c of input.changes) {
+        const spec = ALLOWED_SETTINGS[c.setting];
+        if (!spec) return `unknown setting ${c.setting}`;
+        if (typeof c.value !== "number" || !Number.isFinite(c.value)) return `value of ${c.setting} must be a number`;
+        if (c.value < spec.min || c.value > spec.max) return `${c.setting} must be between ${spec.min} and ${spec.max}`;
+        if (typeof c.reason !== "string") return "reason must be a string";
+    }
+    return null;
+}
+
+async function applyChange(change) {
+    const spec = ALLOWED_SETTINGS[change.setting];
+    const pf = state.config.pf;
+    const value = encodeURIComponent(change.value);
+    let url;
+    if (spec.api === "ai_config") {
+        url = `/rest/ai_config?${spec.key}=${value}&ee=true`;
+    } else if (spec.api === "ai_model") {
+        url = `/rest/ai_model?pf=${pf}&${spec.key}=${value}&ee=true`;
+    } else if (spec.api === "profile") {
+        // pf has to be the first parameter for this endpoint
+        url = `/rest/profile_config?pf=${pf}&${spec.key}=${value}&ee=true`;
+    } else {
+        url = `/rest/charge_mode_config?${spec.key}=${value}&ee=true`;
+    }
+    await getJson(url);
+}
+
+function renderProposal(input) {
+    const card = document.createElement("div");
+    card.className = "card bg-base-100 border border-primary";
+    const body = document.createElement("div");
+    body.className = "card-body p-3 gap-2";
+    const title = document.createElement("div");
+    title.className = "font-bold";
+    title.textContent = t("proposal") + ": " + input.summary;
+    body.appendChild(title);
+
+    const appliers = [];
+    for (const change of input.changes) {
+        const row = document.createElement("div");
+        row.className = "flex justify-between items-center gap-2 text-sm";
+        const label = document.createElement("div");
+        const name = document.createElement("b");
+        name.className = "mono";
+        name.textContent = `${change.setting} = ${change.value}`;
+        const reason = document.createElement("div");
+        reason.className = "opacity-70";
+        reason.textContent = change.reason;
+        label.appendChild(name);
+        label.appendChild(reason);
+
+        const button = document.createElement("button");
+        button.className = "btn btn-xs btn-primary";
+        button.textContent = t("apply");
+        const apply = async () => {
+            if (button.disabled) return;
+            try {
+                await applyChange(change);
+                button.disabled = true;
+                button.textContent = "✓";
+                toast(t("applied"));
+            } catch (e) {
+                toast(t("failed"), "error");
+            }
+        };
+        button.onclick = async () => {
+            await apply();
+            await refreshConfig();
+            await refreshDeviceSettings();
+        };
+        appliers.push(apply);
+        row.appendChild(label);
+        row.appendChild(button);
+        body.appendChild(row);
+    }
+    if (input.changes.length > 1) {
+        const all = document.createElement("button");
+        all.className = "btn btn-sm btn-primary self-end";
+        all.textContent = t("applyAll");
+        all.onclick = async () => {
+            for (const apply of appliers) {
+                await apply();
+            }
+            all.disabled = true;
+            await refreshConfig();
+            await refreshDeviceSettings();
+        };
+        body.appendChild(all);
+    }
+    card.appendChild(body);
+    document.getElementById("chatLog").appendChild(card);
+}
+
+async function askClaude(question) {
+    if (claudeBusy) return;
+    const key = apiKey();
+    if (!key) {
+        toast(t("noKey"), "error");
+        document.getElementById("claudeSetup").open = true;
+        return;
+    }
+
+    claudeBusy = true;
+    document.getElementById("chatSendButton").disabled = true;
+    addBubble("user", question);
+
+    try {
+        const {default: Anthropic} = await loadSdk();
+        const client = new Anthropic({apiKey: key, dangerouslyAllowBrowser: true});
+        await refreshDeviceSettings();
+
+        // Fresh device data with every question
+        conversation.push({
+            role: "user",
+            content: [
+                {type: "text", text: "<device_data>\n" + JSON.stringify(compactContext()) + "\n</device_data>"},
+                {type: "text", text: question},
+            ],
+        });
+
+        const model = selectedModel();
+        let parseRetries = 0;
+        for (let round = 0; round < 4; round += 1) {
+            const bubble = addBubble("assistant", t("thinking"));
+            let text = "";
+
+            const request = {
+                model: model,
+                max_tokens: 16000,
+                system: systemPrompt(),
+                tools: [PROPOSE_TOOL],
+                messages: conversation,
+                thinking: {type: "adaptive"},
+                output_config: {effort: "medium"},
+            };
+            if (model !== "claude-haiku-5-5") {
+                // Server side fallback if a safety classifier declines
+                request.betas = ["server-side-fallback-2026-07-01"];
+                request.fallbacks = "default";
+            }
+
+            let message;
+            try {
+                const stream = client.beta.messages.stream(request);
+                stream.on("text", delta => {
+                    text += delta;
+                    bubble.textContent = text;
+                });
+                message = await stream.finalMessage();
+            } catch (e) {
+                if (e instanceof Anthropic.APIError || parseRetries >= 1) throw e;
+                // Tool input that could not be parsed at all: re-issue the request once
+                parseRetries += 1;
+                bubble.parentElement.remove();
+                round -= 1;
+                continue;
+            }
+            if (!text) bubble.parentElement.remove();
+            conversation.push({role: "assistant", content: message.content});
+
+            if (message.stop_reason === "refusal") {
+                addBubble("assistant", t("refusal"));
+                break;
+            }
+
+            const toolUses = message.content.filter(b => b.type === "tool_use");
+            if (message.stop_reason !== "tool_use" || toolUses.length === 0) {
+                break;
+            }
+
+            const results = toolUses.map(block => {
+                const error = validateProposal(block.input);
+                if (error) {
+                    return {type: "tool_result", tool_use_id: block.id, is_error: true, content: JSON.stringify({INVALID_INPUT: error})};
+                }
+                renderProposal(block.input);
+                return {
+                    type: "tool_result",
+                    tool_use_id: block.id,
+                    content: "Shown to the user with Apply buttons. They decide; do not assume anything was applied. " +
+                             "Finish with at most two sentences.",
+                };
+            });
+            conversation.push({role: "user", content: results});
+        }
+    } catch (e) {
+        let message = String(e && e.message ? e.message : e);
+        const sdk = anthropicModule && anthropicModule.default;
+        if (sdk && e instanceof sdk.AuthenticationError) message = t("authError");
+        else if (sdk && e instanceof sdk.RateLimitError) message = t("rateError");
+        else if (sdk && e instanceof sdk.APIConnectionError) message = t("netError");
+        else if (!anthropicModule) message = t("netError");
+        addBubble("assistant", "⚠ " + message);
+    } finally {
+        claudeBusy = false;
+        document.getElementById("chatSendButton").disabled = false;
+    }
+}
+
+function sendChat() {
+    const input = document.getElementById("chatInput");
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = "";
+    askClaude(text);
+}
+
+function askPowder() {
+    const powder = prompt(t("powderQuestion"));
+    if (powder) {
+        askClaude(t("promptPowder", {powder: powder}));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Start
+// ---------------------------------------------------------------------------
+(async function main() {
+    setLanguage(lang);
+    document.getElementById("modelSelect").value = selectedModel();
+    if (apiKey()) document.getElementById("apiKeyInput").placeholder = "••••••••";
+
+    try {
+        await refreshConfig();
+        await refreshDeviceSettings();
+        onLevelInput();
+    } catch (e) {
+        console.warn(e);
+    }
+    poll();
+})();
+</script>
+</body>
+</html>

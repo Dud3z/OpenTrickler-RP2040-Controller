@@ -17,6 +17,7 @@
 #include "eeprom.h"
 #include "wireless.h"
 #include "system_control.h"
+#include "ai_trickle.h"
 
 // External variables
 extern muif_t muif_list[];
@@ -58,6 +59,15 @@ static uint8_t menu_get_parent_form_id(uint8_t form_id) {
         case 53: return 31;
         case 60: return 37;
         case 61: return 37;
+
+        case 70: return 1;
+        case 71: return 70;
+        case 72: return 70;
+        case 73: return 72;
+        case 74: return 72;
+        case 75: return 72;
+        case 76: return 70;
+        case 77: return 70;
 
         default:
             return 1;
@@ -132,6 +142,16 @@ void menu_task(void *p){
                     break;
                 case APP_STATE_ENTER_WIFI_INFO:
                     exit_form_id = wireless_view_wifi_info();
+                    break;
+                case APP_STATE_ENTER_AI_LEARN:
+                    ai_trickle_learn_start(0);
+                    exit_form_id = charge_mode_menu(false);
+                    break;
+                case APP_STATE_ENTER_AI_APPLY_PRESET:
+                    exit_form_id = ai_trickle_menu_apply_preset();
+                    break;
+                case APP_STATE_ENTER_AI_RESET_MODEL:
+                    exit_form_id = ai_trickle_menu_reset_model();
                     break;
                 default:
                     break;
