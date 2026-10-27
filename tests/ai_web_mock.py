@@ -11,6 +11,7 @@ Usage
 Then open http://localhost:8080/ai
 """
 
+import hashlib
 import json
 import os
 import subprocess
@@ -39,6 +40,12 @@ STATE = {
     'history': EXPORT['history'],
     'trace': EXPORT['trace'],
     'learn': {'la': False, 'ld': 0, 'lt': 8},
+    'series': {'sa': False, 'lad': False, 'sd': 0, 'n': 0, 's0': 0.0, 'step': 0.0, 'rep': 1, 'seq0': 0, 'tg': 42.0, 'err': ''},
+    'diag': {'st': 0, 'el': 0.0, 'dur': 0, 'start': 0.0},
+    'fw': {'board': 'pico2_w', 'ver': 'v2.0-5-g3428e5e', 'vcs': '3428e5e', 'build': 2, 'sup': True, 'part': 0, 'ab': True,
+           'max': 2080768, 'st': 'idle', 'err': '', 'rx': 0, 'size': 0, 'sha': '', 'conf': False},
+    'reboot_until': 0.0,
+    'models': {},
     'requests': [],
 }
 
@@ -93,7 +100,17 @@ class Handler(BaseHTTPRequestHandler):
                 c['a3'] = int(q['a3'])
             self.send_json(c)
         elif url.path == '/rest/ai_model':
-            m = STATE['model']
+            pf = int(q.get('pf', 0))
+            if pf != 0:
+                m = STATE['models'].setdefault(pf, {**STATE['model'], 'pf': pf, 'pn': f'Profile{pf}', 'n': 0, 'fl': 0})
+            else:
+                m = STATE['model']
+            for key in ('fm', 'fsd', 'mt'):
+                if key in q:
+                    m[key] = float(q[key])
+            for key in ('n', 'fl'):
+                if key in q:
+                    m[key] = int(q[key])
             for key in MODEL_KEYS:
                 if key in q:
                     m[key] = float(q[key])
@@ -129,11 +146,83 @@ class Handler(BaseHTTPRequestHandler):
                 if key in q:
                     CHARGE_MODE[key] = float(q[key])
             self.send_json(CHARGE_MODE)
+        elif url.path == '/rest/ai_series':
+            sr = STATE['series']
+            if as_bool(q.get('go', 'false')):
+                sr.update({'sa': True, 'lad': as_bool(q.get('lad', 'false')), 'sd': 0, 'n': int(q['n']),
+                           's0': float(q['s0']), 'step': float(q.get('step', 0)), 'rep': int(q.get('rep', 1)),
+                           'seq0': STATE['history'][-1][0] + 1, 'tg': float(q['s0'])})
+                # Simulate the first three charges of the series
+                for i in range(3):
+                    last = STATE['history'][-1]
+                    target = sr['s0'] + sr['step'] * (i // sr['rep'])
+                    error = [0.0, 0.02, -0.02][i]
+                    STATE['history'].append([last[0] + 1, 0, target, target + error, target - 0.05, 20.0 + i, 1, 1 | 32, 0])
+                sr['sd'] = 3
+                sr['tg'] = sr['s0'] + sr['step'] * (3 // sr['rep'])
+            if as_bool(q.get('stop', 'false')):
+                sr['sa'] = False
+            self.send_json(sr)
+        elif url.path == '/rest/scale_diag':
+            d = STATE['diag']
+            if as_bool(q.get('go', 'false')):
+                d.update({'st': 1, 'dur': int(q.get('s', 20)), 'start': time.time()})
+            out = {'st': d['st'], 'el': 0.0, 'dur': d['dur'], 'err': ''}
+            if d['st'] == 1:
+                el = (time.time() - d['start']) * 5  # 5x faster than real time
+                out['el'] = min(el, d['dur'])
+                if el >= d['dur']:
+                    d['st'] = 2
+            out['st'] = d['st']
+            if d['st'] >= 2:
+                out.update({'n': 200, 'ch': 40, 'hz': 9.8, 'mean': 0.002, 'sd': 0.0162, 'drift': 0.031,
+                            'min': -0.04, 'max': 0.04, 'jump': 0.04, 'res': 0.02})
+            self.send_json(out)
+        elif url.path == '/rest/profile_summary':
+            self.send_json({'s0': {str(i): (EXPORT['model']['pn'] if i == 0 else f'Profile{i}') for i in range(8)}, 's1': 0})
+        elif url.path == '/rest/fw_info':
+            fw = STATE['fw']
+            if fw['st'] == 'rebooting':
+                if time.time() < STATE['reboot_until']:
+                    self.send_response(503)
+                    self.end_headers()
+                    return
+                fw.update({'st': 'idle', 'build': fw['build'] + 1, 'part': 1 - fw['part'], 'conf': True})
+            self.send_json(fw)
+        elif url.path == '/rest/fw_apply':
+            fw = STATE['fw']
+            if as_bool(q.get('go', 'false')) and fw['st'] == 'verified':
+                fw['st'] = 'rebooting'
+                STATE['reboot_until'] = time.time() + 6
+            self.send_json(fw)
         elif url.path == '/mock/requests':
             self.send_json(STATE['requests'])
         else:
             self.send_response(404)
             self.end_headers()
+
+
+def do_POST(self):
+    url = urlparse(self.path)
+    q = {k: v[0] for k, v in parse_qs(url.query).items()}
+    STATE['requests'].append('POST ' + self.path)
+    length = int(self.headers.get('Content-Length', 0))
+    body = self.rfile.read(length)
+    fw = STATE['fw']
+    if url.path == '/upload/firmware':
+        fw['rx'] = len(body)
+        fw['size'] = int(q.get('size', 0))
+        fw['sha'] = hashlib.sha256(body).hexdigest()
+        if fw['size'] != len(body):
+            fw.update({'st': 'error', 'err': 'Size mismatch'})
+        elif fw['sha'] != q.get('sha'):
+            fw.update({'st': 'error', 'err': 'Checksum mismatch'})
+        else:
+            fw.update({'st': 'verified', 'err': ''})
+    self.send_json(fw)
+
+
+Handler.do_POST = do_POST
 
 
 if __name__ == '__main__':

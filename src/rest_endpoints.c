@@ -15,6 +15,8 @@
 #include "servo_gate.h"
 #include "system_control.h"
 #include "ai_trickle.h"
+#include "fw_update.h"
+#include "scale_diag.h"
 
 // Generated headers by html2header.py under scripts
 #include "display_mirror.html.h"
@@ -107,6 +109,10 @@ bool rest_endpoints_init(bool default_wizard) {
     rest_register_handler("/rest/ai_history", http_rest_ai_history);
     rest_register_handler("/rest/ai_trace", http_rest_ai_trace);
     rest_register_handler("/rest/ai_learn", http_rest_ai_learn);
+    rest_register_handler("/rest/ai_series", http_rest_ai_series);
+    rest_register_handler("/rest/scale_diag", http_rest_scale_diag);
+    rest_register_handler("/rest/fw_info", http_rest_fw_info);
+    rest_register_handler("/rest/fw_apply", http_rest_fw_apply);
 
     return true;
 }

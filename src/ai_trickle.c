@@ -69,6 +69,16 @@ static float learn_err_sum2 = 0.0f;
 static float last_error_gr = NAN;
 static bool last_adaptive = false;
 
+static bool series_active = false;
+static bool series_ladder = false;
+static bool series_just_finished = false;
+static uint8_t series_done = 0;
+static uint8_t series_total = 0;
+static uint8_t series_repeats = 1;
+static float series_start_gr = 0.0f;
+static float series_step_gr = 0.0f;
+static uint32_t series_first_seq = 0;
+
 
 // ---------------------------------------------------------------------------
 // Configuration and models
@@ -248,6 +258,99 @@ static void learn_session_update(float final_error, bool scored) {
 
 
 // ---------------------------------------------------------------------------
+// Series and ladder
+// ---------------------------------------------------------------------------
+
+static float ladder_target(uint8_t throw_idx) {
+    return series_start_gr + series_step_gr * (float) (throw_idx / series_repeats);
+}
+
+
+static bool series_start(bool ladder, uint8_t total, float start_gr, float step_gr, uint8_t repeats) {
+    if (total < 1 || total > AI_SERIES_MAX_THROWS || !(start_gr > 0.0f)) {
+        return false;
+    }
+    if (repeats < 1) {
+        repeats = 1;
+    }
+    if (ladder) {
+        // The user sets every number, the limits only catch typos
+        if (fabsf(step_gr) > AI_LADDER_MAX_STEP_GR || step_gr == 0.0f) {
+            return false;
+        }
+        float last = start_gr + step_gr * (float) ((total - 1) / repeats);
+        if (!(last > 0.0f)) {
+            return false;
+        }
+    }
+
+    series_active = true;
+    series_ladder = ladder;
+    series_just_finished = false;
+    series_done = 0;
+    series_total = total;
+    series_repeats = repeats;
+    series_start_gr = start_gr;
+    series_step_gr = ladder ? step_gr : 0.0f;
+    series_first_seq = history_seq + 1;
+
+    charge_mode_config.target_charge_weight = ladder ? ladder_target(0) : start_gr;
+    return true;
+}
+
+
+static void series_after_throw(void) {
+    if (!series_active) {
+        return;
+    }
+
+    series_done += 1;
+    if (series_done >= series_total) {
+        series_active = false;
+        series_just_finished = true;
+        return;
+    }
+
+    if (series_ladder) {
+        // Next rung, picked up by the next charge
+        charge_mode_config.target_charge_weight = ladder_target(series_done);
+    }
+}
+
+
+bool ai_trickle_series_active(void) {
+    return series_active;
+}
+
+
+void ai_trickle_series_stop(void) {
+    series_active = false;
+}
+
+
+bool ai_trickle_series_is_ladder(void) {
+    return series_ladder;
+}
+
+
+bool ai_trickle_series_just_finished(void) {
+    bool finished = series_just_finished;
+    series_just_finished = false;
+    return finished;
+}
+
+
+uint8_t ai_trickle_series_done(void) {
+    return series_done;
+}
+
+
+uint8_t ai_trickle_series_total(void) {
+    return series_total;
+}
+
+
+// ---------------------------------------------------------------------------
 // Classic (PID) charges: recorded so the model can learn passively
 // ---------------------------------------------------------------------------
 
@@ -289,9 +392,14 @@ void ai_trickle_classic_end(float target_gr, float settled_gr, float charge_time
         }
     }
 
+    if (series_active) {
+        flags |= AI_THROW_FLAG_SERIES;
+    }
+
     last_error_gr = settled_gr - target_gr;
     last_adaptive = false;
     history_add(target_gr, settled_gr, NAN, charge_time_s, 0, flags);
+    series_after_throw();
 }
 
 
@@ -379,6 +487,9 @@ void ai_trickle_adaptive_end(float charge_time_s) {
     if (!done) {
         flags |= AI_THROW_FLAG_FAULT;
     }
+    if (series_active) {
+        flags |= AI_THROW_FLAG_SERIES;
+    }
 
     float gain = learn_active ? LEARN_GAIN : (ai_trickle_data.auto_learn ? CONTINUOUS_GAIN : 0.0f);
     if (done && gain > 0.0f) {
@@ -397,6 +508,9 @@ void ai_trickle_adaptive_end(float charge_time_s) {
     if (learn_active && done) {
         // The probe throw carries extra powder from the pulses, do not score it
         learn_session_update(last_error_gr, !throw_probe);
+    }
+    if (done) {
+        series_after_throw();
     }
 }
 
@@ -596,6 +710,7 @@ bool http_rest_ai_model(struct fs_file *file, int num_params, char *params[], ch
     // cv (float): flow_cv
     // bias (float): stop_bias_gr
     // lsd (float): landing_sd_gr
+    // fm, fsd, mt (float), n, fl (int): statistics, count and flags (restore a backup)
     // rst (bool): reset the model
     // ee (bool): save to eeprom
     static char buf[512];
@@ -642,6 +757,24 @@ bool http_rest_ai_model(struct fs_file *file, int num_params, char *params[], ch
         }
         else if (strcmp(params[idx], "lsd") == 0) {
             target = &model->landing_sd_gr;
+        }
+        else if (strcmp(params[idx], "fm") == 0) {
+            target = &model->final_mean_gr;
+        }
+        else if (strcmp(params[idx], "fsd") == 0) {
+            target = &model->final_sd_gr;
+        }
+        else if (strcmp(params[idx], "mt") == 0) {
+            target = &model->mean_time_s;
+        }
+        else if (strcmp(params[idx], "n") == 0) {
+            // Restored from a backup
+            model->learned_throws = (uint16_t) strtoul(values[idx], NULL, 10);
+            modified = true;
+        }
+        else if (strcmp(params[idx], "fl") == 0) {
+            model->flags = (uint16_t) strtoul(values[idx], NULL, 10);
+            modified = true;
         }
         else if (strcmp(params[idx], "rst") == 0 && string_to_boolean(values[idx])) {
             trickle_model_reset(model);
@@ -874,6 +1007,87 @@ bool http_rest_ai_learn(struct fs_file *file, int num_params, char *params[], ch
              learn_done,
              learn_total,
              charge_mode_config.target_charge_weight);
+
+    rest_set_response(file, buf);
+    return true;
+}
+
+
+bool http_rest_ai_series(struct fs_file *file, int num_params, char *params[], char *values[]) {
+    // Mappings
+    // go (bool): start, enters charge mode if needed
+    // stop (bool): end the series
+    // lad (bool): ladder instead of a plain series
+    // n (int): number of charges
+    // s0 (float): charge weight (series) or first weight (ladder)
+    // step (float): ladder step
+    // rep (int): charges per ladder rung
+    // Response adds: sa (active), sd (done), seq0 (sequence number of the first charge), tg (current target)
+    static char buf[256];
+    bool go = false;
+    bool stop = false;
+    bool ladder = false;
+    int total = 0;
+    int repeats = 1;
+    float start = NAN;
+    float step = 0.0f;
+    const char * error = "";
+
+    for (int idx = 0; idx < num_params; idx += 1) {
+        if (strcmp(params[idx], "go") == 0) {
+            go = string_to_boolean(values[idx]);
+        }
+        else if (strcmp(params[idx], "stop") == 0) {
+            stop = string_to_boolean(values[idx]);
+        }
+        else if (strcmp(params[idx], "lad") == 0) {
+            ladder = string_to_boolean(values[idx]);
+        }
+        else if (strcmp(params[idx], "n") == 0) {
+            total = atoi(values[idx]);
+        }
+        else if (strcmp(params[idx], "rep") == 0) {
+            repeats = atoi(values[idx]);
+        }
+        else if (strcmp(params[idx], "s0") == 0) {
+            start = strtof(values[idx], NULL);
+        }
+        else if (strcmp(params[idx], "step") == 0) {
+            step = strtof(values[idx], NULL);
+        }
+    }
+
+    if (stop) {
+        series_active = false;
+    }
+
+    if (go) {
+        if (repeats < 1 || repeats > AI_SERIES_MAX_THROWS ||
+            !series_start(ladder, (uint8_t) (total > 0 && total <= AI_SERIES_MAX_THROWS ? total : 0), start, step, (uint8_t) repeats)) {
+            error = "Invalid series";
+        }
+        else if (charge_mode_config.charge_mode_state == CHARGE_MODE_EXIT) {
+            exit_state = APP_STATE_ENTER_CHARGE_MODE_FROM_REST;
+            ButtonEncoderEvent_t button_event = OVERRIDE_FROM_REST;
+            xQueueSend(encoder_event_queue, &button_event, portMAX_DELAY);
+            charge_mode_config.charge_mode_state = CHARGE_MODE_WAIT_FOR_ZERO;
+        }
+    }
+
+    snprintf(buf, sizeof(buf),
+             "%s{\"sa\":%s,\"lad\":%s,\"sd\":%d,\"n\":%d,\"s0\":%.3f,\"step\":%.3f,\"rep\":%d,"
+             "\"seq0\":%lu,\"tg\":%.3f,\"err\":\"%s\"}",
+             http_json_header,
+             boolean_to_string(series_active),
+             boolean_to_string(series_ladder),
+             series_done,
+             series_total,
+             series_start_gr,
+             series_step_gr,
+             series_repeats,
+             (unsigned long) series_first_seq,
+             charge_mode_config.target_charge_weight,
+             error);
 
     rest_set_response(file, buf);
     return true;

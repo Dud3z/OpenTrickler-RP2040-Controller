@@ -20,6 +20,8 @@ jobs:
     # You can convert this to a matrix build if you need cross-platform coverage.
     # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # publish the firmware branch for the web updater
 
     steps:
     - uses: actions/checkout@v4
@@ -73,3 +75,16 @@ jobs:
           build_pico_w/*.map
           build_pico_w/*.hex
           build_pico_w/*.uf2
+
+    # Publish the images to the 'firmware' branch, the web updater downloads them from there
+    - name: Publish Firmware for the Web Updater
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      run: |
+        python3 scripts/make_firmware_manifest.py --out publish
+        cd publish
+        git init -q -b firmware
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git add -A
+        git commit -q -m "Firmware ${GITHUB_SHA::7}"
+        git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" firmware

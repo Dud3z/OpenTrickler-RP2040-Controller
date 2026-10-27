@@ -115,6 +115,39 @@ target_link_libraries("${TARGET_NAME}"
 )
 
 target_link_options("${TARGET_NAME}" PUBLIC -Wl,--gc-sections -Wl,--print-memory-usage)
+
+# Build number: commit count, increases with every commit on main
+execute_process(
+    COMMAND git rev-list --count HEAD
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_VARIABLE APP_BUILD_NUMBER
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+if (NOT APP_BUILD_NUMBER)
+    set(APP_BUILD_NUMBER 0)
+endif()
+target_compile_definitions("${TARGET_NAME}" PRIVATE APP_BUILD_NUMBER=${APP_BUILD_NUMBER})
+
+# Firmware update over WiFi (RP2350): A/B partitions with try-before-you-buy
+if (PICO_RP2350)
+    target_link_libraries("${TARGET_NAME}" pico_flash hardware_flash boot_uf2_headers boot_picoboot_headers)
+
+    # Unconfirmed updates fall back to the previous firmware
+    target_compile_definitions("${TARGET_NAME}" PRIVATE PICO_CRT0_IMAGE_TYPE_TBYB=1)
+
+    # The bootrom boots the partition with the higher version
+    pico_set_binary_version("${TARGET_NAME}" MAJOR 1 MINOR ${APP_BUILD_NUMBER})
+
+    # The bootrom verifies this hash and refuses a damaged image
+    pico_hash_binary("${TARGET_NAME}")
+
+    # Partition table, installed once via USB (pt.uf2)
+    add_custom_command(TARGET "${TARGET_NAME}" POST_BUILD
+        COMMAND picotool partition create ${CMAKE_SOURCE_DIR}/targets/pico2_w_ab_partitions.json ${CMAKE_BINARY_DIR}/pt.uf2
+        COMMENT "Generating A/B partition table pt.uf2"
+    )
+endif()
 # set( CMAKE_VERBOSE_MAKEFILE on )
 
 # Generate extra outputs

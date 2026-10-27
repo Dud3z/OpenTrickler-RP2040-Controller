@@ -50,6 +50,10 @@ Join our [discord server](https://discord.gg/ZhdThA2vrW) for help and developmen
 
 * AI Trickle: adaptive, self-learning charge controller with optional Claude assistant, see [manuals/ai_trickle.md](manuals/ai_trickle.md)
 
+* Series and ladder mode, scale diagnostics, model backup
+
+* Firmware update over WiFi (Pico 2 W, A/B partitions with automatic rollback)
+
 ## Get Started
 
 ### Use with mini 12864 display

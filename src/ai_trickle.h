@@ -29,6 +29,10 @@
 #define AI_THROW_FLAG_PROBE                 (1 << 2)
 #define AI_THROW_FLAG_FAULT                 (1 << 3)
 #define AI_THROW_FLAG_MODEL_UPDATED         (1 << 4)
+#define AI_THROW_FLAG_SERIES                (1 << 5)
+
+#define AI_SERIES_MAX_THROWS                100
+#define AI_LADDER_MAX_STEP_GR               2.0f
 
 
 typedef enum {
@@ -101,6 +105,14 @@ bool ai_trickle_learn_just_finished(void);
 uint8_t ai_trickle_learn_done(void);
 uint8_t ai_trickle_learn_total(void);
 
+// Series (n charges at one weight) and ladder (weight increases step by step)
+bool ai_trickle_series_active(void);
+void ai_trickle_series_stop(void);
+bool ai_trickle_series_is_ladder(void);
+bool ai_trickle_series_just_finished(void);
+uint8_t ai_trickle_series_done(void);
+uint8_t ai_trickle_series_total(void);
+
 // Display menu actions, return the form to go back to
 uint8_t ai_trickle_menu_apply_preset(void);
 uint8_t ai_trickle_menu_reset_model(void);
@@ -114,6 +126,7 @@ bool http_rest_ai_status(struct fs_file *file, int num_params, char *params[], c
 bool http_rest_ai_history(struct fs_file *file, int num_params, char *params[], char *values[]);
 bool http_rest_ai_trace(struct fs_file *file, int num_params, char *params[], char *values[]);
 bool http_rest_ai_learn(struct fs_file *file, int num_params, char *params[], char *values[]);
+bool http_rest_ai_series(struct fs_file *file, int num_params, char *params[], char *values[]);
 
 #ifdef __cplusplus
 }

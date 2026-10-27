@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "trickle_model.h"
+#include "sha256.h"
 
 
 static int failures = 0;
@@ -327,6 +328,30 @@ static void test_sanitize(void) {
 }
 
 
+static void test_sha256(void) {
+    // FIPS 180-2 test vectors
+    struct { const char * msg; const char * hex; } vectors[] = {
+        {"", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+        {"abc", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"},
+        {"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq",
+         "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"},
+    };
+    for (size_t i = 0; i < sizeof(vectors) / sizeof(vectors[0]); i += 1) {
+        sha256_ctx_t ctx;
+        uint8_t digest[32];
+        char hex[65];
+        sha256_init(&ctx);
+        // Feed byte by byte to exercise the block handling
+        for (const char * c = vectors[i].msg; *c; c += 1) {
+            sha256_update(&ctx, c, 1);
+        }
+        sha256_final(&ctx, digest);
+        sha256_to_hex(digest, hex);
+        CHECK(strcmp(hex, vectors[i].hex) == 0, "sha256(%s) = %s", vectors[i].msg, hex);
+    }
+}
+
+
 int main(void) {
     test_mode_params();
     test_fit_recovers_parameters();
@@ -336,6 +361,7 @@ int main(void) {
     test_controller_detects_no_flow();
     test_learning_converges();
     test_sanitize();
+    test_sha256();
 
     if (failures) {
         printf("%d check(s) failed\n", failures);

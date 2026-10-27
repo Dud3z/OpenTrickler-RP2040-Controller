@@ -308,6 +308,11 @@ static void charge_mode_set_charging_title(trickle_phase_t phase) {
         snprintf(title_string, sizeof(title_string), "Learn %d/%d %s",
                  ai_trickle_learn_done() + 1, ai_trickle_learn_total(), target_weight_string);
     }
+    else if (ai_trickle_series_active()) {
+        snprintf(title_string, sizeof(title_string), "%s %d/%d %s",
+                 ai_trickle_series_is_ladder() ? "Ladder" : "Series",
+                 ai_trickle_series_done() + 1, ai_trickle_series_total(), target_weight_string);
+    }
     else if (phase == TRICKLE_PHASE_PROBE || phase == TRICKLE_PHASE_TOPUP) {
         snprintf(title_string, sizeof(title_string), "%s %s", ai_trickle_phase_name(phase), target_weight_string);
     }
@@ -478,6 +483,9 @@ void charge_mode_wait_for_complete() {
     snprintf(title_string, sizeof(title_string), 
              "Target: %s", 
              target_weight_string);
+    if (ai_trickle_series_active()) {
+        charge_mode_set_charging_title(TRICKLE_PHASE_COARSE);
+    }
 
     // Read trickling parameter from the current profile
     profile_t * current_profile = profile_get_selected();
@@ -648,6 +656,12 @@ void charge_mode_wait_for_cup_removal() {
         ai_trickle_classic_end(charge_mode_config.target_charge_weight, current_measurement, last_charge_elapsed_seconds);
     }
 
+    // A finished series or ladder leaves charge mode once the cup is removed
+    bool series_finished = ai_trickle_series_just_finished();
+    if (series_finished) {
+        snprintf(title_string, sizeof(title_string), "Done! Remove Cup");
+    }
+
     // Update LED colour before moving to the next stage
     // Over charged
     if (error <= -threshold) {
@@ -724,7 +738,7 @@ void charge_mode_wait_for_cup_removal() {
                             neopixel_led_config.eeprom_neopixel_led_metadata.default_led_colours.led2_colour,
                             true);
 
-    charge_mode_config.charge_mode_state = CHARGE_MODE_WAIT_FOR_CUP_RETURN;
+    charge_mode_config.charge_mode_state = series_finished ? CHARGE_MODE_EXIT : CHARGE_MODE_WAIT_FOR_CUP_RETURN;
 }
 
 void charge_mode_wait_for_cup_return() { 
@@ -841,8 +855,9 @@ uint8_t charge_mode_menu(bool charge_mode_skip_user_input) {
                             neopixel_led_config.eeprom_neopixel_led_metadata.default_led_colours.led2_colour,
                             true);
 
-    // A learning session ends with the charge mode
+    // A learning session or series ends with the charge mode
     ai_trickle_learn_stop();
+    ai_trickle_series_stop();
 
     // vTaskDelete(scale_measurement_render_handler);
     vTaskSuspend(scale_measurement_render_task_handler);

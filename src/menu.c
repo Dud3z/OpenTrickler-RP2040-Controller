@@ -18,6 +18,7 @@
 #include "wireless.h"
 #include "system_control.h"
 #include "ai_trickle.h"
+#include "fw_update.h"
 
 // External variables
 extern muif_t muif_list[];
@@ -79,6 +80,9 @@ void menu_task(void *p){
     u8g2_t * display_handler = get_display_handler();
     // Create UI element
     mui_t mui;
+
+    // The system is up: confirm a freshly installed firmware update
+    fw_update_confirm_boot();
 
     mui_Init(&mui, display_handler, fds_data, muif_list, muif_cnt);
     mui_GotoForm(&mui, 1, 0);

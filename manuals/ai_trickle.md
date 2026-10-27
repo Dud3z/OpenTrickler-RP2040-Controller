@@ -34,7 +34,7 @@ If a profile has not been learned yet, the first charge automatically starts wit
 
 ### Web page
 
-In the web portal, tap **AI** in the bottom bar, or open `http://<trickler-ip>/ai` directly:
+In the web portal, tap **AI** in the bottom bar, or open `http://<trickler-ip>/ai` directly. The page has four tabs: **Overview**, **Learn** (learning, series & ladder, model and backup), **Assistant** (Claude) and **System** (scale diagnostics, firmware update).
 
 * Live status with predicted final weight
 * Precision ↔ speed slider with tolerance and an estimated time (calibrated with your actual times)
@@ -53,6 +53,45 @@ In the web portal, tap **AI** in the bottom bar, or open `http://<trickler-ip>/a
 Claude receives the settings, the learned model, the last throws and the trace of the last throw. It explains what is going on and proposes concrete changes as a card with **Apply** buttons. Nothing changes until you click one. Claude tunes the machine only and gives no load data.
 
 Default model: Claude Opus 5.5. For lower cost choose Sonnet 5.5 or Haiku 5.5.
+
+### Series and ladder
+
+*Learn* tab → **Series & ladder**.
+
+* **Series:** a fixed number of charges at one weight. During the series the display shows `Series 3/20 42.00`. Afterwards the trickler leaves charge mode and the page shows the result: mean, spread, share within tolerance, total time, as a table and as CSV.
+* **Ladder:** start weight, step, number of charges and charges per rung. The trickler raises the charge weight after each rung by itself (display: `Ladder 4/10 42.90`). Before starting, the page lists every charge weight for confirmation. The result table shows the actual weights per rung. All values come from you; the trickler only checks for obvious typos (at most 100 charges, step at most 2 gr).
+
+### Model backup
+
+*Learn* tab → **Learned powder model** → **Backup**:
+
+* **Export:** saves the models of all 8 profiles plus the AI settings as a JSON file.
+* **Import:** restores such a file, for example after an EEPROM erase or on a new board.
+* **Copy:** takes over the model of another profile into the current one, as a start for a similar powder. It keeps learning from there.
+
+### Scale diagnostics
+
+*System* tab → **Scale diagnostics**. Outside charge mode, leave the scale untouched for 10/20/60 s. Result: readings per second, noise (after removing drift), drift per minute, largest jump, resolution, each with a plain verdict, e.g. "draft or vibration" or "let the scale warm up". The results are also passed to Claude.
+
+### Firmware update over WiFi (Pico 2 W)
+
+The Pico 2 W has two firmware slots (A/B). An update is written into the slot that is not running, checked with SHA-256 and only then started. Each new firmware first runs on trial: if it does not confirm itself within about 16 seconds after starting, the chip automatically returns to the previous firmware. Settings and learned models are stored in the EEPROM and survive every update.
+
+**One-time setup (USB):**
+
+1. Hold BOOTSEL and plug in USB, the Pico shows up as a drive.
+2. Drag `pico2_w_partition_table.uf2` onto it. The Pico restarts and shows up as a drive again.
+3. Drag `pico2_w.uf2` onto it.
+
+Both files are offered on the *System* tab as long as the setup is missing. They are also in the `firmware` branch of your repository.
+
+**After that:** *System* → **Check for updates** → **Install** → **Restart & activate**. Your phone or PC downloads the firmware from GitHub, checks it and sends it to the trickler, so the trickler itself does not need internet access. Alternatively, upload a `.bin` file from your computer with **Upload file**.
+
+Charge mode must be off during an update.
+
+**Prerequisite on GitHub:** in your fork under *Actions*, enable the workflows once. After that, every push to `main` builds the firmware and publishes it to the `firmware` branch together with a `manifest.json`.
+
+The Pico W (RP2040) has no A/B support. For it, the page offers the UF2 file for the USB method.
 
 ## Precision levels
 
@@ -99,4 +138,9 @@ make -C tests/sim run
 * `tests/sim/` – unit tests, benchmark, data export
 * `tests/ai_web_mock.py` – REST mock for developing the web page
 
-REST endpoints: `/rest/ai_config`, `/rest/ai_model`, `/rest/ai_status`, `/rest/ai_history`, `/rest/ai_trace`, `/rest/ai_learn`.
+* `src/fw_update.c/.h`, `src/sha256.c/.h` – firmware update (HTTP POST into the free A/B partition, try-before-you-buy)
+* `src/scale_diag.c/.h` – scale diagnostics
+* `targets/pico2_w_ab_partitions.json` – partition table, the build creates `pt.uf2` from it
+* `scripts/make_firmware_manifest.py` – collects images + manifest for the `firmware` branch (CI)
+
+REST endpoints: `/rest/ai_config`, `/rest/ai_model`, `/rest/ai_status`, `/rest/ai_history`, `/rest/ai_trace`, `/rest/ai_learn`, `/rest/ai_series`, `/rest/scale_diag`, `/rest/fw_info`, `/rest/fw_apply`, `POST /upload/firmware?size=&sha=`.
