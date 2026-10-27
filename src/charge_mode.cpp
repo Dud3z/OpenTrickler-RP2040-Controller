@@ -277,6 +277,11 @@ static void charge_mode_get_trickler_limits(trickle_motor_limits_t * limits) {
                                 current_profile->fine_max_flow_speed_rps);
     limits->fine_min_rps = fmax(get_motor_min_speed(SELECT_FINE_TRICKLER_MOTOR),
                                 current_profile->fine_min_flow_speed_rps);
+
+    // The motor ramps (motor settings: acceleration and gear ratio) decide
+    // how fast a speed change really happens
+    limits->coarse_accel_rps2 = get_motor_acceleration(SELECT_COARSE_TRICKLER_MOTOR);
+    limits->fine_accel_rps2 = get_motor_acceleration(SELECT_FINE_TRICKLER_MOTOR);
 }
 
 
@@ -365,6 +370,15 @@ static void charge_mode_wait_for_complete_adaptive() {
 
     trickle_phase_t last_phase = TRICKLE_PHASE_DONE;
 
+    // Only send speed changes: every command makes the motor task ramp, and
+    // its queue is short, so repeating unchanged speeds would only stall
+    // this loop
+    float sent_coarse_rps = 0.0f;
+    float sent_fine_rps = 0.0f;
+    // After a coarse stop the motor ramps down by itself (and may back off);
+    // the controller's own ramp down must not restart it
+    bool coarse_stop_hold = false;
+
     while (true) {
         // Non block waiting for the input
         ButtonEncoderEvent_t button_encoder_event = button_wait_for_input(false);
@@ -387,6 +401,7 @@ static void charge_mode_wait_for_complete_adaptive() {
         // Handle coarse trickler backoff stop
         if (coarse_backoff_in_progress && (current_sample_tick >= coarse_backoff_end_tick)) {
             motor_set_speed(SELECT_COARSE_TRICKLER_MOTOR, 0);
+            sent_coarse_rps = 0.0f;
             coarse_backoff_in_progress = false;
         }
 
@@ -397,6 +412,8 @@ static void charge_mode_wait_for_complete_adaptive() {
 
         if (events & TRICKLE_EVENT_COARSE_STOPPED) {
             motor_set_speed(SELECT_COARSE_TRICKLER_MOTOR, 0);
+            sent_coarse_rps = 0.0f;
+            coarse_stop_hold = true;
 
             // When the coarse trickler stops, move the servo gate to a configured ratio
             if (servo_gate.eeprom_servo_gate_config.servo_gate_enable && phase != TRICKLE_PHASE_PROBE) {
@@ -405,10 +422,17 @@ static void charge_mode_wait_for_complete_adaptive() {
             coarse_trickler_backoff(limits.coarse_min_rps);
         }
 
-        if (!coarse_backoff_in_progress) {
-            motor_set_speed(SELECT_COARSE_TRICKLER_MOTOR, coarse_rps);
+        if (coarse_stop_hold && coarse_rps <= 0.0f) {
+            coarse_stop_hold = false;
         }
-        motor_set_speed(SELECT_FINE_TRICKLER_MOTOR, fine_rps);
+        if (!coarse_backoff_in_progress && !coarse_stop_hold && coarse_rps != sent_coarse_rps) {
+            motor_set_speed(SELECT_COARSE_TRICKLER_MOTOR, coarse_rps);
+            sent_coarse_rps = coarse_rps;
+        }
+        if (fine_rps != sent_fine_rps) {
+            motor_set_speed(SELECT_FINE_TRICKLER_MOTOR, fine_rps);
+            sent_fine_rps = fine_rps;
+        }
 
         if (phase != last_phase) {
             charge_mode_set_charging_title(phase);
@@ -418,6 +442,9 @@ static void charge_mode_wait_for_complete_adaptive() {
         if (phase == TRICKLE_PHASE_FAULT_NO_FLOW || phase == TRICKLE_PHASE_FAULT_TIMEOUT) {
             motor_set_speed(SELECT_FINE_TRICKLER_MOTOR, 0);
             motor_set_speed(SELECT_COARSE_TRICKLER_MOTOR, 0);
+            sent_coarse_rps = 0.0f;
+            sent_fine_rps = 0.0f;
+            coarse_stop_hold = false;
             coarse_backoff_in_progress = false;
 
             // Most likely the hopper ran empty: wait for the user

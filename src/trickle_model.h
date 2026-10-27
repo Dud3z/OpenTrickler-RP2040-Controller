@@ -108,6 +108,8 @@ typedef struct {
     float coarse_max_rps;
     float fine_min_rps;
     float fine_max_rps;
+    float coarse_accel_rps2;    // Trickler acceleration of the motor ramp, 0 = instant
+    float fine_accel_rps2;
 } trickle_motor_limits_t;
 
 
@@ -164,8 +166,11 @@ typedef struct {
     uint16_t cmd_head;
     uint16_t cmd_count;
 
-    float coarse_rps;
+    float coarse_rps;           // Wanted speeds
     float fine_rps;
+    float coarse_out;           // Speeds sent to the motors, limited by their acceleration
+    float fine_out;
+    float t_out;
     float predicted_gr;         // Predicted final weight if the motors stopped now
 
     // Settle detection

@@ -66,6 +66,21 @@ static float gerpf(float a, float b, float x) {
 }
 
 
+// Move towards target by at most max_step, max_step <= 0 means no limit
+static float slew(float current, float target, float max_step) {
+    if (max_step <= 0.0f) {
+        return target;
+    }
+    if (target > current + max_step) {
+        return current + max_step;
+    }
+    if (target < current - max_step) {
+        return current - max_step;
+    }
+    return target;
+}
+
+
 static float positive(float v) {
     return v > 0.0f ? v : 0.0f;
 }
@@ -489,6 +504,7 @@ void trickle_ctrl_init(trickle_ctrl_t * ctrl, float target_gr,
 
     ctrl->flow_check_t = t_now;
     ctrl->flow_check_weight_gr = current_weight_gr;
+    ctrl->t_out = t_now;
 
     if (current_weight_gr >= ctrl->coarse_goal_gr) {
         // Already close to the target (e.g. resumed charge), skip the coarse phase
@@ -581,7 +597,16 @@ static void ctrl_step_main(trickle_ctrl_t * ctrl, float t_now, float weight_gr) 
         tail_pending += ctrl->model.coarse_tail_gr * (1.0f - arrived);
     }
 
-    float predicted = weight_gr + inflight + tail_pending;
+    // Powder the motors still deliver while ramping down to standstill
+    float ramp_down = 0.0f;
+    if (ctrl->limits.coarse_accel_rps2 > 0.0f) {
+        ramp_down += ctrl->model.coarse_gpr * ctrl->coarse_out * ctrl->coarse_out / (2.0f * ctrl->limits.coarse_accel_rps2);
+    }
+    if (ctrl->limits.fine_accel_rps2 > 0.0f) {
+        ramp_down += ctrl->model.fine_gpr * ctrl->fine_out * ctrl->fine_out / (2.0f * ctrl->limits.fine_accel_rps2);
+    }
+
+    float predicted = weight_gr + inflight + tail_pending + ramp_down;
     ctrl->predicted_gr = predicted;
 
     float aim = ctrl_aim_weight(ctrl);
@@ -830,8 +855,8 @@ trickle_phase_t trickle_ctrl_step(trickle_ctrl_t * ctrl, float t_now, float weig
 
     // Ignore invalid readings, keep the previous command
     if (isnan(weight_gr) || isinf(weight_gr)) {
-        *coarse_rps = ctrl->coarse_rps;
-        *fine_rps = ctrl->fine_rps;
+        *coarse_rps = ctrl->coarse_out;
+        *fine_rps = ctrl->fine_out;
         return ctrl->phase;
     }
     ctrl->last_weight_gr = weight_gr;
@@ -865,10 +890,22 @@ trickle_phase_t trickle_ctrl_step(trickle_ctrl_t * ctrl, float t_now, float weig
         ctrl->fine_rps = 0.0f;
     }
 
-    ctrl_record_command(ctrl, t_now, ctrl->coarse_rps, ctrl->fine_rps);
+    // The motors ramp with a limited acceleration; command the same ramp so
+    // that the command history (and with it the powder in flight) matches
+    // what the motors really do, and a speed change never blocks the motor
+    // task for longer than one sample
+    float dt = t_now - ctrl->t_out;
+    if (dt < 0.0f) {
+        dt = 0.0f;
+    }
+    ctrl->coarse_out = slew(ctrl->coarse_out, ctrl->coarse_rps, ctrl->limits.coarse_accel_rps2 * dt);
+    ctrl->fine_out = slew(ctrl->fine_out, ctrl->fine_rps, ctrl->limits.fine_accel_rps2 * dt);
+    ctrl->t_out = t_now;
 
-    *coarse_rps = ctrl->coarse_rps;
-    *fine_rps = ctrl->fine_rps;
+    ctrl_record_command(ctrl, t_now, ctrl->coarse_out, ctrl->fine_out);
+
+    *coarse_rps = ctrl->coarse_out;
+    *fine_rps = ctrl->fine_out;
 
     return ctrl->phase;
 }

@@ -116,6 +116,14 @@ The **tolerance** decides when a charge is good: the scale reading must be withi
 
 Note: a single kernel of extruded powder weighs about 0.01-0.04 gr. Tolerances below one kernel weight are physically impossible for that powder, and with a 0.02 gr tolerance one stray kernel decides.
 
+### How the other settings are used
+
+* **Motor settings:** the max/min speed caps the profile speeds (the lower value wins), the acceleration and gear ratio give the motor ramp. The controller ramps its commands the same way and counts the powder that still comes while a motor slows down. Settings → AI Trickle shows the limits in use and warns when a motor setting caps the profile.
+* **Profiles:** the min/max flow speeds are used by both controllers; Kp/Ki/Kd only by the classic PID controller (marked in the settings).
+* **Charge Mode:** the stop thresholds only apply to the classic controller (marked). Backoff, LED colours, decimal places, zero check and pre-charge apply to both.
+* **Servo gate:** when it is disabled, the gate controls on the Trickler page and the pre-charge/gate fields under Charge Mode are hidden.
+* **Export/Import Config** (System Control) includes the AI Trickle settings.
+
 ### Does the AI change the Charge Mode settings?
 
 No. The adaptive controller does not use the PID gains (Kp/Ki/Kd) or the coarse/fine stop thresholds at all; it plans every charge from the learned model. It does use from the profile and charge mode settings: the **min/max speeds** of both tubes, the coarse backoff, the servo gate, precharge, the LED colours, the decimal places and the zero check.

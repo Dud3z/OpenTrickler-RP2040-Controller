@@ -335,7 +335,7 @@ static void test_learning_converges(void) {
         static trickle_ctrl_t ctrl;
         trickle_mode_params_t mode;
         trickle_mode_params_from_level(TRICKLE_LEVEL_BALANCED, &mode);
-        trickle_motor_limits_t limits = {0.1f, 6.0f, 0.05f, 3.0f};
+        trickle_motor_limits_t limits = {0.1f, 6.0f, 0.05f, 3.0f, 0.0f, 0.0f};
         trickle_ctrl_init(&ctrl, 35.0f, &model, &mode, &limits, 0.0f, 0.0f);
         trickle_trace_reset(&trace, 0.0f);
 

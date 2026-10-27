@@ -26,6 +26,10 @@
 #define LEARN_GAIN          0.3f
 #define CONTINUOUS_GAIN     0.1f
 
+#ifndef BENCH_ACCEL
+#define BENCH_ACCEL         50.0f       // Motor ramp, same as powder_sim accel_rps2
+#endif
+
 
 typedef struct {
     // Mirrors profile_t / eeprom_charge_mode_data_t defaults used by the firmware
@@ -221,6 +225,8 @@ static trickle_motor_limits_t limits_from_profile(const classic_profile_t * p) {
         .coarse_max_rps = p->coarse_max_rps,
         .fine_min_rps = p->fine_min_rps,
         .fine_max_rps = p->fine_max_rps,
+        .coarse_accel_rps2 = BENCH_ACCEL,
+        .fine_accel_rps2 = BENCH_ACCEL,
     };
     return limits;
 }
@@ -246,6 +252,7 @@ static throw_outcome_t run_adaptive(powder_sim_t * sim, const classic_profile_t 
 
     bool backoff = false;
     float backoff_end = 0.0f;
+    bool coarse_stop_hold = false;   // Same as charge_mode.cpp
 
     while (true) {
         float w = next_reading(sim);
@@ -259,6 +266,7 @@ static throw_outcome_t run_adaptive(powder_sim_t * sim, const classic_profile_t 
         }
 
         if (ctrl.events & TRICKLE_EVENT_COARSE_STOPPED) {
+            coarse_stop_hold = true;
             trickle_trace_mark_coarse_stop(trace, now);
             if (p->backoff_turns > 0.0f) {
                 backoff = true;
@@ -275,6 +283,12 @@ static throw_outcome_t run_adaptive(powder_sim_t * sim, const classic_profile_t 
                 trickle_model_learn(model, &probe_fit, NULL, 1.0f);
                 trickle_ctrl_update_model(&ctrl, model);
             }
+        }
+        if (coarse_stop_hold && coarse_rps <= 0.0f) {
+            coarse_stop_hold = false;
+        }
+        if (coarse_stop_hold) {
+            coarse_rps = 0.0f;
         }
         if (backoff) {
             if (now >= backoff_end) {

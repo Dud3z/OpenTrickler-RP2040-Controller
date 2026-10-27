@@ -537,6 +537,34 @@ uint16_t get_motor_max_speed(motor_select_t selected_motor) {
 }
 
 
+/*
+ * Acceleration in trickler revolutions per s^2. motor_set_speed() takes
+ * trickler speeds and divides them by the gear ratio, the ramp then runs at
+ * angular_acceleration on the motor side.
+ */
+float get_motor_acceleration(motor_select_t selected_motor) {
+    motor_config_t * motor_config = NULL;
+    switch (selected_motor)
+    {
+    case SELECT_COARSE_TRICKLER_MOTOR:
+        motor_config = &coarse_trickler_motor_config;
+        break;
+    case SELECT_FINE_TRICKLER_MOTOR:
+        motor_config = &fine_trickler_motor_config;
+        break;
+
+    default:
+        break;
+    }
+
+    if (motor_config) {
+        return motor_config->persistent_config.angular_acceleration * motor_config->persistent_config.gear_ratio;
+    }
+
+    return 0.0f;
+}
+
+
 float get_motor_min_speed(motor_select_t selected_motor) {
     motor_config_t * motor_config = NULL;
     switch (selected_motor)

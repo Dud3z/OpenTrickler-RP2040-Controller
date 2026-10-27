@@ -2894,7 +2894,9 @@ static err_t http_find_file(struct http_state * hs, const char * uri, int is_09)
     path_copy[path_len] = '\0';
     decode_uri(decoded_path, path_copy);
 
-    char params_buf[LWIP_HTTPD_MAX_REQUEST_URI_LEN];
+    // Static: the httpd only runs in the tcpip thread, and a settings form
+    // easily exceeds the 128 byte URI limit
+    static char params_buf[REST_MAX_QUERY_LEN];
     if (query != NULL) {
         strncpy(params_buf, query + 1, sizeof(params_buf) - 1);
         params_buf[sizeof(params_buf) - 1] = '\0';

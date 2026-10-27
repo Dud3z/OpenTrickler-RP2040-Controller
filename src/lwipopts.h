@@ -32,6 +32,8 @@
 #define LWIP_HTTPD_DYNAMIC_FILE_READ    0
 #define LWIP_HTTPD_DYNAMIC_HEADERS      0
 #define LWIP_HTTPD_MAX_REQUEST_URI_LEN  128
+#define LWIP_HTTPD_MAX_CGI_PARAMETERS   32   // Settings forms send up to ~20 values
+#define REST_MAX_QUERY_LEN              640  // Query string of a REST call (the request itself is limited to 1023)
 #define LWIP_HTTPD_DYNAMIC_HEADERS      0
 #define LWIP_SOCKETS 1
 

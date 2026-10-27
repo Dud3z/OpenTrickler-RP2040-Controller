@@ -90,6 +90,7 @@ void motor_task(void *p);
 void motor_set_speed(motor_select_t selected_motor, float new_velocity);
 uint16_t get_motor_max_speed(motor_select_t selected_motor);
 float get_motor_min_speed(motor_select_t selected_motor);
+float get_motor_acceleration(motor_select_t selected_motor);
 void motor_enable(motor_select_t selected_motor, bool enable);
 const char * get_motor_select_string(motor_select_t selected_motor);
 void handle_motor_init_error(motor_init_err_t err);

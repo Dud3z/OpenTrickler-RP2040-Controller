@@ -36,7 +36,8 @@ EXPORT = load_export()
 
 STATE = {
     'config': {'a0': True, 'a1': 50, 'a2': True, 'a3': 8, 'a4': True, 'a5': 0.02, 'tol': 0.02, 'sp': 70,
-               'as': [0.04, 0.6, 9.8, 70, 9.6], 'est': 24.0, 'tg': 42.0,
+               'as': [0.04, 0.6, 9.8, 70, 9.6], 'lim': [0.1, 5.0, 0.08, 2.0], 'pmx': [8.0, 2.0], 'acc': [62.5, 90.9],
+               'est': 24.0, 'tg': 42.0,
                'pf': 0, 'pn': EXPORT['model']['pn'], 'rd': True},
     'model': EXPORT['model'],
     'history': EXPORT['history'],
@@ -56,6 +57,8 @@ PROFILE = {'pf': 0, 'p0': 0, 'p1': 0, 'p2': EXPORT['model']['pn'], 'p3': 0.05, '
 CHARGE_MODE = {'c1': '#00ff00', 'c2': '#ffff00', 'c3': '#ff0000', 'c4': '#0000ff', 'c5': 5.0, 'c6': 0.03,
                'c7': 0.02, 'c8': 0.02, 'c9': 0, 'c10': False, 'c11': 1000, 'c12': 2.0, 'c13': 0.0, 'c14': True,
                'c15': 0.25, 'c16': 1.0}
+
+SERVO = {'c0': False, 'c1': 0.05, 'c2': 0.1, 'c3': 0.05, 'c4': 0.1, 'c5': 1.0, 'c6': 1.0}
 
 MODEL_KEYS = ['kc', 'kf', 'lat', 'tl', 'tsd', 'tau', 'cv', 'bias', 'lsd']
 
@@ -155,6 +158,12 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({'m0': 5000.0, 'm1': 200, 'm2': 500, 'm3': 256,
                             'm4': 20 if 'coarse' in url.path else 6, 'm5': 110, 'm6': 0.02, 'm7': 1.0,
                             'm8': False, 'm9': False})
+        elif url.path == '/rest/servo_gate_config':
+            if 'c0' in q:
+                SERVO['c0'] = as_bool(q['c0'])
+            self.send_json(SERVO)
+        elif url.path == '/rest/charge_mode_state':
+            self.send_json({'s0': 42.0, 's1': 12.3, 's2': 0, 's3': 1, 's4': EXPORT['model']['pn'], 's5': '9.80'})
         elif url.path == '/rest/charge_mode_config':
             for key in CHARGE_MODE:
                 if key in q:

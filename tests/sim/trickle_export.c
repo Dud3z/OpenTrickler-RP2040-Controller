@@ -38,7 +38,7 @@ int main(void) {
     trickle_model_reset(&model);
     trickle_mode_params_t mode;
     trickle_mode_params_from_level(TRICKLE_LEVEL_PRECISION, &mode);
-    trickle_motor_limits_t limits = {0.1f, 8.0f, 0.08f, 2.0f};
+    trickle_motor_limits_t limits = {0.1f, 8.0f, 0.08f, 2.0f, 50.0f, 50.0f};
 
     printf("{\"history\":[");
     for (int i = 0; i < THROWS; i += 1) {

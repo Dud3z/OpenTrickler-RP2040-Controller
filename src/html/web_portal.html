@@ -63,6 +63,9 @@
                         <li id="chargeModeStateReturnCup" class="step">Return Cup</li>
                     </ul>
 
+                    <!-- AI Trickle state: phase while charging, mode otherwise -->
+                    <div id="aiStatusLine" class="text-sm text-center opacity-80" style="display: none;"></div>
+
                     <!-- Row 3 -->
                     <input id="chargeWeightInput" type="number" step="0.001" placeholder="Charge Weight" class="input input-bordered input-primary" pattern="[0-9]+([\.,][0-9]+)?"/>
 
@@ -89,49 +92,38 @@
                 <div class="divider">Scale Control</div>
                 <div class="grid grid-cols-1 gap-2">
                     <button class="btn btn-neutral" onclick="scaleForceZero()">Scale Zero</button>
-					<div class="h-8"></div>
-					<!-- Gate Ratio Control -->
-                    <div class="grid grid-cols-1 gap-2">
-                        <div class="divider">Gate Control</div>
-                    </div>
-                      
-				</div>				
-                    
-				<div class="grid grid-cols-3 gap-2"> 
-					<button class="btn btn-neutral" onclick="servoGateSetState(2)">Gate Open</button>
-					
-					
-					<input id="servoGateRatioNumber"
-						   type="number"
-						   min="0"
-						   max="1"
-						   step="0.001"
-						   value="0.500"
-						   class="input input-bordered input-primary"
-						   readonly />
-								
-					<button class="btn btn-neutral" onclick="servoGateSetState(1)">Gate Close</button>
-				</div>
-				<div></div>
-                <div class="grid grid-cols-1 gap-2">
-                        <input id="servoGateRatioSlider"
-                               type="range"
+                </div>
+
+                <!-- Gate Ratio Control, only shown when the servo gate is enabled -->
+                <div id="gateControlSection" class="grid grid-cols-1 gap-2" style="display: none;">
+                    <div class="divider">Gate Control</div>
+                    <div class="grid grid-cols-3 gap-2">
+                        <button class="btn btn-neutral" onclick="servoGateSetState(2)">Gate Open</button>
+                        <input id="servoGateRatioNumber"
+                               type="number"
                                min="0"
-                               max="1000"
-                               step="1"
-                               value="500"
-                               class="range range-lg"
-                               oninput="onServoGateRatioInput(); debouncedServoGateRatioSend();" />
-				</div>
-				<div class="grid grid-cols-1 gap-2">
-					<div></div>
-					<div class="flex justify-between w-full">
-						<span class="label-text">0.000 = Open</span>
-						<span class="label-text">1.000 = Close</span>
-					</div>
-				</div>
-			</div>
-		</div>
+                               max="1"
+                               step="0.001"
+                               value="0.500"
+                               class="input input-bordered input-primary"
+                               readonly />
+                        <button class="btn btn-neutral" onclick="servoGateSetState(1)">Gate Close</button>
+                    </div>
+                    <input id="servoGateRatioSlider"
+                           type="range"
+                           min="0"
+                           max="1000"
+                           step="1"
+                           value="500"
+                           class="range range-lg"
+                           oninput="onServoGateRatioInput(); debouncedServoGateRatioSend();" />
+                    <div class="flex justify-between w-full">
+                        <span class="label-text">0.000 = Open</span>
+                        <span class="label-text">1.000 = Close</span>
+                    </div>
+                </div>
+            </div>
+        </div>
 
         
     </section>
@@ -252,17 +244,17 @@
                             </div>
 
                             <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Coarse Trickler Kp</span>
+                                <span class="label-text">Coarse Trickler Kp (classic PID only)</span>
                                 <input type="number" class="input input-bordered" name="p3" step="0.001">
                             </div>
 
                             <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Coarse Trickler Ki</span>
+                                <span class="label-text">Coarse Trickler Ki (classic PID only)</span>
                                 <input type="number" class="input input-bordered" name="p4" step="0.001">
                             </div>
 
                             <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Coarse Trickler Kd</span>
+                                <span class="label-text">Coarse Trickler Kd (classic PID only)</span>
                                 <input type="number" class="input input-bordered" name="p5" step="0.001">
                             </div>
 
@@ -277,17 +269,17 @@
                             </div>
 
                             <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Fine Trickler Kp</span>
+                                <span class="label-text">Fine Trickler Kp (classic PID only)</span>
                                 <input type="number" class="input input-bordered" name="p8" step="0.001">
                             </div>
 
                             <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Fine Trickler Ki</span>
+                                <span class="label-text">Fine Trickler Ki (classic PID only)</span>
                                 <input type="number" class="input input-bordered" name="p9" step="0.001">
                             </div>
 
                             <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Fine Trickler Kd</span>
+                                <span class="label-text">Fine Trickler Kd (classic PID only)</span>
                                 <input type="number" class="input input-bordered" name="p10" step="0.001">
                             </div>
 
@@ -332,12 +324,12 @@
                             <div class="divider"></div>
 
                             <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Coarse Trickler Stop Threshold</span>
+                                <span class="label-text">Coarse Trickler Stop Threshold (classic PID only)</span>
                                 <input type="number" class="input input-bordered" name="c5" step="0.001">
                             </div>
 
                             <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Fine Trickler Stop Threshold</span>
+                                <span class="label-text">Fine Trickler Stop Threshold (classic PID only)</span>
                                 <input type="number" class="input input-bordered" name="c6" step="0.001">
                             </div>
 
@@ -361,7 +353,7 @@
 
                             <div class="divider"></div>
 
-                            <div class="grid grid-cols-1 gap-1">
+                            <div class="grid grid-cols-1 gap-1 requires-servo-gate">
                                 <span class="label-text">Enable Pre-Charge (requires servo gate)</span>
                                 <select class="select select-bordered" name="c10">
                                     <option value="true">Yes</option>
@@ -369,16 +361,16 @@
                                 </select>
                             </div>
 
-                            <div class="grid grid-cols-1 gap-1">
+                            <div class="grid grid-cols-1 gap-1 requires-servo-gate">
                                 <span class="label-text">Pre-Charge Duration (ms)</span>
                                 <input type="number" class="input input-bordered" name="c11" step="1">
                             </div>
 
-                            <div class="grid grid-cols-1 gap-1">
+                            <div class="grid grid-cols-1 gap-1 requires-servo-gate">
                                 <span class="label-text">Pre-Charge Speed (rps)</span>
                                 <input type="number" class="input input-bordered" name="c12" step="0.001">
                             </div>
-							<div class="grid grid-cols-1 gap-1">
+							<div class="grid grid-cols-1 gap-1 requires-servo-gate">
                                 <span class="label-text">Mid-stage Servo Gate Position (0=open, 1=close)</span>
                                 <input type="number" class="input input-bordered" name="c13" step="0.001" min="0" max="1">
                             </div>
@@ -447,6 +439,11 @@
                             <div class="grid grid-cols-1 gap-1">
                                 <span class="label-text">Speed in Use for the Current Profile</span>
                                 <input type="text" class="input input-bordered" name="sp" disabled="disabled" readonly>
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Speed Limits in Use (profile and motor settings combined)</span>
+                                <div id="aiLimitsInfo" class="text-sm"></div>
                             </div>
 
                             <div class="grid grid-cols-1 gap-1">
@@ -1279,6 +1276,7 @@
             // Update web element
             _setCurrentWeight(current_charge_weight, percentage);
             _setChargeModeStateWidget(charge_mode_state);
+            refreshAiStatusLine();
 
             profileName = document.getElementById("profileName");
             profileName.innerText = String(profile_name);
@@ -1481,6 +1479,9 @@
                 purgeNavButton.classList.remove("active");
                 tricklerNavButton.classList.add("active");
 
+                // Settings may have changed in the meantime
+                refreshDeviceOptions();
+
                 // Restart
                 _restartPoll();
                 break;
@@ -1494,6 +1495,8 @@
                 settingsNavButton.classList.remove("active");
                 tricklerNavButton.classList.remove("active");
                 purgeNavButton.classList.add("active");
+
+                refreshDeviceOptions();
                 
                 // Restart
                 _restartPoll();
@@ -1515,6 +1518,9 @@
 
                 // Remove polling event
                 clearTimeout(pollSetTimeoutId);
+
+                // Fields that depend on other settings (servo gate)
+                refreshDeviceOptions();
 
                 // Load the first settings
                 onSettingsLinkClicked("settings-scale");
@@ -1558,6 +1564,9 @@
 
         if (sectionId == "settings-system-control") {
             fwRefreshInfo();
+        }
+        if (sectionId == "settings-ai-trickle") {
+            renderAiLimits();
         }
 
         // Populate values
@@ -1641,6 +1650,12 @@
                     }
                 }
             })
+
+            // Other pages may depend on what changed (servo gate, AI mode, motor limits)
+            refreshDeviceOptions();
+            if (targetForm.id == "aiTrickleConfigForm") {
+                renderAiLimits();
+            }
 
             // Show the success modal
             const settingsAppliedSuccessDialog = document.getElementById("settingsAppliedSuccessDialog");
@@ -1813,6 +1828,7 @@
             "/rest/profile_config?pf=6",
             "/rest/profile_config?pf=7",
             "/rest/servo_gate_config",
+            "/rest/ai_config",
         ]
 
         // Read metadata
@@ -1902,6 +1918,88 @@
             reader.readAsText(file);
         }
         input.click();
+    }
+
+    // Options that depend on other settings: servo gate controls, cleanup
+    // speed range, AI mode line
+    let aiConfig = null;
+
+    async function refreshDeviceOptions() {
+        try {
+            const servo = await getJson("/rest/servo_gate_config");
+            const gateEnabled = String(servo["c0"]) == "true";
+            document.getElementById("gateControlSection").style.display = gateEnabled ? "" : "none";
+            document.querySelectorAll(".requires-servo-gate").forEach(el => { el.style.display = gateEnabled ? "" : "none"; });
+        } catch (e) {
+            console.warn(e);
+        }
+        try {
+            // Cleanup moves the coarse trickler, its motor limit is the useful range
+            const motor = await getJson("/rest/coarse_motor_config");
+            const max = Number(motor["m4"]) || 5;
+            const slider = document.getElementById("tricklerSpeedSlider");
+            slider.min = -max;
+            slider.max = max;
+        } catch (e) {
+            console.warn(e);
+        }
+        try {
+            aiConfig = await getJson("/rest/ai_config");
+        } catch (e) {
+            aiConfig = null;
+        }
+        refreshAiStatusLine();
+    }
+
+    let aiStatusPending = false;
+
+    async function refreshAiStatusLine() {
+        const line = document.getElementById("aiStatusLine");
+        if (!aiConfig || aiStatusPending) {
+            return;
+        }
+        if (!aiConfig.a0) {
+            line.style.display = "";
+            line.textContent = "Classic PID controller (AI Trickle off)";
+            return;
+        }
+        aiStatusPending = true;
+        try {
+            const status = await getJson("/rest/ai_status");
+            const mode = `Speed ${aiConfig.sp}${aiConfig.a4 ? " (auto)" : ""} · ±${Number(aiConfig.a5).toFixed(2)} gr`;
+            line.style.display = "";
+            if (status.ar) {
+                line.textContent = `AI Trickle: ${status.pn} · ${mode}`;
+            }
+            else if (status.la) {
+                line.textContent = `AI Trickle: learning ${status.ld}/${status.lt} · ${mode}`;
+            }
+            else {
+                line.textContent = `AI Trickle · ${mode}`;
+            }
+        } catch (e) {
+            // Keep the previous text
+        } finally {
+            aiStatusPending = false;
+        }
+    }
+
+    async function renderAiLimits() {
+        const info = document.getElementById("aiLimitsInfo");
+        try {
+            const c = await getJson("/rest/ai_config");
+            const notes = [];
+            if (c.lim[1] < c.pmx[0] - 0.001) notes.push(`the coarse motor max speed (${c.lim[1]}) caps the profile value (${c.pmx[0]})`);
+            if (c.lim[3] < c.pmx[1] - 0.001) notes.push(`the fine motor max speed (${c.lim[3]}) caps the profile value (${c.pmx[1]})`);
+            info.innerHTML =
+                `Profile <b>${c.pn}</b>: coarse ${c.lim[0]} … <b>${c.lim[1]}</b> rev/s, fine ${c.lim[2]} … <b>${c.lim[3]}</b> rev/s, ` +
+                `motor ramps ${c.acc[0]} / ${c.acc[1]} rev/s²` +
+                (c.est !== null ? `, estimated time for ${c.tg} gr ≈ <b>${Number(c.est).toFixed(0)} s</b>` : "") + "." +
+                (notes.length ? `<br>Note: ${notes.join("; ")}. Raise it under Coarse/Fine Motor if the motor runs reliably faster.` : "") +
+                `<br>Change the speeds per profile under <a class="link" onclick="onSettingsLinkClicked('settings-profile')">Profiles</a>.`;
+        } catch (e) {
+            info.textContent = "-";
+        }
     }
 
     // Scale diagnostics (Settings -> Scale)
@@ -2210,10 +2308,18 @@
             onNavButtonClicked('settings');
             onSettingsLinkClicked(hash);
         }
+        else if (hash == "settings") {
+            onNavButtonClicked('settings');
+        }
+        else if (hash == "purge") {
+            onNavButtonClicked('purge');
+        }
         else {
             onNavButtonClicked('trickler');
         }
     }
+
+    window.addEventListener("hashchange", onPageLoaded);
 
     // Start the long polling process when the page loads
     if (document.readyState != "loading") {
