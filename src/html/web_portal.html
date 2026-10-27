@@ -190,6 +190,22 @@
 
                             <button class="btn btn-neutral settings-apply-btn">Apply</button>
                         </form>
+
+                        <div class="divider">Scale Diagnostics</div>
+                        <div class="grid grid-cols-1 gap-3">
+                            <span class="label-text">Measures the empty or steadily loaded scale: how often it reports, how much it fluctuates and whether it drifts. Only outside charge mode, do not touch anything while measuring.</span>
+                            <div class="grid grid-cols-2 gap-2">
+                                <select class="select select-bordered" id="diagSeconds">
+                                    <option value="10">10 s</option>
+                                    <option value="20" selected>20 s</option>
+                                    <option value="60">60 s</option>
+                                </select>
+                                <button class="btn btn-neutral" onclick="startScaleDiag()">Measure</button>
+                            </div>
+                            <progress id="diagProgress" class="progress progress-primary w-full" value="0" max="100"></progress>
+                            <div id="diagResult" class="grid grid-cols-2 gap-1 text-sm"></div>
+                            <ul id="diagVerdict" class="text-sm list-disc pl-5"></ul>
+                        </div>
                     </section>
 
                     <!-- Profile Settings -->
@@ -211,6 +227,7 @@
                                     </svg>
                                     <a href="https://github.com/eamars/OpenTrickler/blob/main/Manual/tuning_guide.md" class="link">Powder Profile Tuning Guide</a>
                                 </div>
+                                <span class="label-text text-sm opacity-80">With AI Trickle enabled, the Kp/Ki/Kd values are not used. The min/max flow speeds are used by both controllers, the max speeds limit the charge time the most.</span>
 
                                 <span class="label-text">Select Profile</span>
                                 <select class="select select-bordered select-primary" name="pf" onchange="populateProfileSelection(this)" id="select_profile_option">
@@ -291,6 +308,7 @@
                     <!-- Charge Mode Settings -->
                     <section class="settings-page" id="settings-charge-mode" name="Charge Mode" style="display: none;">
                         <form id="chargeModeConfigForm" action="/rest/charge_mode_config" class="grid grid-cols-1 gap-3">
+                            <span class="label-text text-sm opacity-80">With AI Trickle enabled, the coarse/fine stop thresholds are not used and the tolerance is set under AI Trickle. Colours, backoff, precharge, decimal places and the zero check apply to both controllers.</span>
                             <div class="grid grid-cols-2 gap-1">
                                 <span class="label-text">Neopixel LED Normal Charge Colour</span>
                                 <input type="color" class="input w-full" name="c1">
@@ -395,6 +413,59 @@
                     </section>
 
                     <!-- Wireless Settings -->
+                    <!-- AI Trickle Settings -->
+                    <section class="settings-page" id="settings-ai-trickle" name="AI Trickle" style="display: none;">
+                        <form id="aiTrickleConfigForm" action="/rest/ai_config" class="grid grid-cols-1 gap-3">
+                            <span class="label-text text-sm opacity-80">Adaptive controller that learns how the powder behaves per profile and plans every charge. Learning sessions, history and the assistant are on the <a class="link" href="/ai">AI page</a>.</span>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">AI Trickle Enable</span>
+                                <select class="select select-bordered" name="a0">
+                                    <option value="true">Yes</option>
+                                    <option value="false">No (classic PID)</option>
+                                </select>
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Tolerance (gr)</span>
+                                <input type="number" class="input input-bordered" name="a5" step="0.01" min="0.01" max="0.5">
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Auto Speed (tuned per profile)</span>
+                                <select class="select select-bordered" name="a4">
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Speed, 0 = careful ... 100 = fast (start value with Auto Speed)</span>
+                                <input type="number" class="input input-bordered" name="a1" step="5" min="0" max="100">
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Speed in Use for the Current Profile</span>
+                                <input type="text" class="input input-bordered" name="sp" disabled="disabled" readonly>
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Keep Learning During Normal Charges</span>
+                                <select class="select select-bordered" name="a2">
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Throws per Learning Session</span>
+                                <input type="number" class="input input-bordered" name="a3" step="1" min="2" max="20">
+                            </div>
+
+                            <button class="btn btn-neutral settings-apply-btn">Apply</button>
+                        </form>
+                    </section>
+
                     <section class="settings-page" id="settings-wireless" name="Wireless" style="display: none;">
                         <form id="wirelessConfigForm" action="/rest/wireless_config" class="grid grid-cols-1 gap-3">
                             <div class="grid grid-cols-1 gap-1">
@@ -779,6 +850,28 @@
                             <button class="btn btn-neutral system-control-import-btn" onclick="onImportConfigClicked()">Import Config</button>
                         </div>
 
+                        <div class="divider">Firmware Update</div>
+                        <div class="grid grid-cols-1 gap-3">
+                            <div id="fwInstalled" class="grid grid-cols-2 gap-1 text-sm"></div>
+                            <div id="fwSetup" role="alert" class="alert text-sm hidden"></div>
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Source (GitHub repository)</span>
+                                <input id="fwRepo" type="text" class="input input-bordered" placeholder="owner/repo">
+                            </div>
+                            <div class="grid grid-cols-2 gap-2">
+                                <button class="btn btn-neutral" onclick="fwCheckUpdate()">Check for Updates</button>
+                                <label class="btn btn-neutral">
+                                    Upload File
+                                    <input id="fwFile" type="file" accept=".bin" class="hidden" onchange="fwInstallLocal(this.files[0])">
+                                </label>
+                            </div>
+                            <div id="fwAvailable" class="text-sm"></div>
+                            <progress id="fwProgress" class="progress progress-primary w-full hidden" value="0" max="100"></progress>
+                            <div id="fwStatus" class="text-sm"></div>
+                            <button id="fwInstallButton" class="btn btn-primary hidden" onclick="fwInstallUpdate()">Install</button>
+                            <button id="fwApplyButton" class="btn btn-warning hidden" onclick="fwApplyUpdate()">Restart &amp; Activate</button>
+                        </div>
+
                     </section>
 
                 </div>
@@ -790,6 +883,7 @@
                     <li><a class="text-lg" onclick="onSettingsLinkClicked('settings-scale')">Scale</a></li>
                     <li><a class="text-lg" onclick="onSettingsLinkClicked('settings-profile')">Profiles</a></li>
                     <li><a class="text-lg" onclick="onSettingsLinkClicked('settings-charge-mode')">Charge Mode</a></li>
+                    <li><a class="text-lg" onclick="onSettingsLinkClicked('settings-ai-trickle')">AI Trickle</a></li>
                     <li><a class="text-lg" onclick="onSettingsLinkClicked('settings-wireless')">Wireless</a></li>
                     <li><a class="text-lg" onclick="onSettingsLinkClicked('settings-coarse-motor')">Coarse Motor</a></li>
                     <li><a class="text-lg" onclick="onSettingsLinkClicked('settings-fine-motor')">Fine Motor</a></li>
@@ -1462,6 +1556,10 @@
             settingsDrawer.checked = false;
         }
 
+        if (sectionId == "settings-system-control") {
+            fwRefreshInfo();
+        }
+
         // Populate values
         const form = targetSection.querySelector("form");
         if (form) {
@@ -1806,12 +1904,323 @@
         input.click();
     }
 
+    // Scale diagnostics (Settings -> Scale)
+    let scaleDiag = null;
+
+    function fmtNum(v, digits) {
+        return (v === null || v === undefined || Number.isNaN(v)) ? "-" : Number(v).toFixed(digits);
+    }
+
+    function fmtSigned(v, digits) {
+        return (v === null || v === undefined || Number.isNaN(v)) ? "-" : (v >= 0 ? "+" : "") + Number(v).toFixed(digits);
+    }
+
+    async function getJson(uri) {
+        const response = await fetch(uri, {cache: "no-store"});
+        if (!response.ok) {
+            throw new Error(String(response.status));
+        }
+        return response.json();
+    }
+
+    async function startScaleDiag() {
+        const seconds = document.getElementById("diagSeconds").value;
+        try {
+            const result = await getJson(`/rest/scale_diag?go=true&s=${seconds}`);
+            if (result.err) {
+                document.getElementById("diagVerdict").innerHTML = `<li>${result.err}</li>`;
+                return;
+            }
+            scaleDiag = result;
+            pollScaleDiag();
+        } catch (e) {
+            document.getElementById("diagVerdict").innerHTML = "<li>Failed</li>";
+        }
+    }
+
+    async function pollScaleDiag() {
+        try {
+            scaleDiag = await getJson("/rest/scale_diag");
+            renderScaleDiag();
+            if (scaleDiag.st === 1) {
+                setTimeout(pollScaleDiag, 1000);
+            }
+        } catch (e) {
+            setTimeout(pollScaleDiag, 2000);
+        }
+    }
+
+    function renderScaleDiag() {
+        const d = scaleDiag;
+        document.getElementById("diagProgress").value = d.st === 1 ? 100 * d.el / d.dur : (d.st >= 2 ? 100 : 0);
+        if (d.st < 2) {
+            return;
+        }
+        document.getElementById("diagResult").innerHTML =
+            `<div>Rate: <b>${fmtNum(d.hz, 1)} Hz</b></div>` +
+            `<div>Noise: <b>±${fmtNum(d.sd, 4)} gr</b></div>` +
+            `<div>Drift: <b>${fmtSigned(d.drift, 3)} gr/min</b></div>` +
+            `<div>Range: <b>${fmtNum(d.min, 2)} … ${fmtNum(d.max, 2)}</b></div>` +
+            `<div>Largest jump: <b>${fmtNum(d.jump, 3)} gr</b></div>` +
+            `<div>Resolution: <b>${fmtNum(d.res, 3)} gr</b></div>`;
+
+        const verdict = [];
+        if (d.st === 3) verdict.push("Aborted (charge mode started).");
+        if (d.hz !== null && d.hz < 5) verdict.push(`The scale only sends ${fmtNum(d.hz, 1)} readings/s. Set the data output to stream at the fastest rate, otherwise the trickler reacts slowly.`);
+        if (d.sd !== null && d.sd > 0.012) verdict.push(`Unsteady reading (±${fmtNum(d.sd, 3)} gr): draft or vibration. Close the draft shield, put the scale on a solid heavy base, decouple the motors.`);
+        if (d.drift !== null && Math.abs(d.drift) > 0.02) verdict.push(`The scale drifts by ${fmtSigned(d.drift, 3)} gr/min. Let it warm up for at least 30 min, keep the temperature constant, recalibrate if needed.`);
+        if (d.jump !== null && d.sd !== null && d.jump > 0.1 && d.sd < 0.012) verdict.push(`Single jumps up to ${fmtNum(d.jump, 2)} gr despite a calm reading: check for bumps, cable tension or static charge.`);
+        if (verdict.length === 0) verdict.push("Everything looks good.");
+        document.getElementById("diagVerdict").innerHTML = verdict.map(v => `<li>${v}</li>`).join("");
+    }
+
+    // Firmware update (Settings -> System Control). Pico 2 W only: the
+    // image goes into the free A/B partition and is checked before use.
+    const FW_REPO_STORE = "firmwareRepo";
+    const FW_DEFAULT_REPO = "Dud3z/opentrickler-rp2040-controller";
+    let fwInfo = null;
+    let fwManifest = null;
+
+    function fwRepo() {
+        const input = document.getElementById("fwRepo");
+        const repo = (input.value || "").trim() || FW_DEFAULT_REPO;
+        try { localStorage.setItem(FW_REPO_STORE, repo); } catch (e) {}
+        return repo;
+    }
+
+    function fwRawUrl(file) {
+        return `https://raw.githubusercontent.com/${fwRepo()}/firmware/${file}`;
+    }
+
+    async function fwRefreshInfo() {
+        const repoInput = document.getElementById("fwRepo");
+        if (!repoInput.value) {
+            try { repoInput.value = localStorage.getItem(FW_REPO_STORE) || FW_DEFAULT_REPO; } catch (e) { repoInput.value = FW_DEFAULT_REPO; }
+        }
+        try {
+            fwInfo = await getJson("/rest/fw_info");
+        } catch (e) {
+            return;
+        }
+        const f = fwInfo;
+        document.getElementById("fwInstalled").innerHTML =
+            `<div>Board: <b>${f.board}</b></div>` +
+            `<div>Build: <b>${f.build}</b></div>` +
+            `<div>Version: <b>${f.ver}</b></div>` +
+            `<div>Slot: <b>${f.part < 0 ? "-" : (f.part === 0 ? "A" : "B")}</b></div>`;
+
+        const setup = document.getElementById("fwSetup");
+        if (!f.sup) {
+            setup.textContent = "Updates over WiFi are only available for the Pico 2 W. For the Pico W please flash the UF2 file over USB.";
+            setup.classList.remove("hidden");
+        } else if (!f.ab) {
+            setup.innerHTML = "One-time setup over USB required: 1. Hold BOOTSEL and plug in USB. " +
+                `2. Drag <a class="link" href="${fwRawUrl("pico2_w_partition_table.uf2")}" download>pico2_w_partition_table.uf2</a> onto the drive, the Pico restarts and shows up as a drive again. ` +
+                `3. Drag <a class="link" href="${fwRawUrl("pico2_w.uf2")}" download>pico2_w.uf2</a> onto it. ` +
+                "After that all updates go over WiFi. Settings are kept (EEPROM).";
+            setup.classList.remove("hidden");
+        } else {
+            setup.classList.add("hidden");
+        }
+        document.getElementById("fwApplyButton").classList.toggle("hidden", f.st !== "verified");
+    }
+
+    async function fwCheckUpdate() {
+        const out = document.getElementById("fwAvailable");
+        try {
+            const response = await fetch(fwRawUrl("manifest.json") + "?t=" + Date.now(), {cache: "no-store"});
+            if (!response.ok) throw new Error(response.status);
+            fwManifest = await response.json();
+        } catch (e) {
+            fwManifest = null;
+            out.textContent = "No firmware found in the repository. Are GitHub Actions enabled for the fork? This device also needs internet access.";
+            document.getElementById("fwInstallButton").classList.add("hidden");
+            return;
+        }
+        await fwRefreshInfo();
+        const m = fwManifest;
+        const newer = fwInfo && m.build > fwInfo.build;
+        const notes = (m.notes || []).slice(0, 8).map(n => `<li>${n.replace(/</g, "&lt;")}</li>`).join("");
+        out.innerHTML = `<b>${newer ? `Update available: build ${m.build} (${m.date.slice(0, 10)})` : `Up to date (build ${m.build})`}</b>` +
+                        `<ul class="list-disc pl-5 opacity-80">${notes}</ul>`;
+        const canInstall = fwInfo && fwInfo.sup && fwInfo.ab && m.files && m.files["pico2_w.bin"];
+        document.getElementById("fwInstallButton").classList.toggle("hidden", !canInstall);
+    }
+
+    async function fwDownload(url, progress) {
+        const response = await fetch(url, {cache: "no-store"});
+        if (!response.ok || !response.body) throw new Error(String(response.status));
+        const total = Number(response.headers.get("content-length")) || 0;
+        const reader = response.body.getReader();
+        const chunks = [];
+        let received = 0;
+        while (true) {
+            const {done, value} = await reader.read();
+            if (done) break;
+            chunks.push(value);
+            received += value.length;
+            if (total) progress.value = 100 * received / total;
+        }
+        const bytes = new Uint8Array(received);
+        let offset = 0;
+        for (const chunk of chunks) {
+            bytes.set(chunk, offset);
+            offset += chunk.length;
+        }
+        return bytes;
+    }
+
+    // SHA-256 in plain JS, crypto.subtle is not available on http pages
+    function sha256Hex(bytes) {
+        const K = new Uint32Array([
+            0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+            0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+            0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+            0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+            0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+            0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+            0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+            0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2]);
+        const H = new Uint32Array([0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]);
+        const length = bytes.length;
+        const padded = new Uint8Array(((length + 9 + 63) >> 6) << 6);
+        padded.set(bytes);
+        padded[length] = 0x80;
+        const view = new DataView(padded.buffer);
+        view.setUint32(padded.length - 8, Math.floor(length / 0x20000000), false);
+        view.setUint32(padded.length - 4, (length << 3) >>> 0, false);
+        const w = new Uint32Array(64);
+        const rotr = (x, n) => (x >>> n) | (x << (32 - n));
+        for (let offset = 0; offset < padded.length; offset += 64) {
+            for (let i = 0; i < 16; i += 1) w[i] = view.getUint32(offset + i * 4, false);
+            for (let i = 16; i < 64; i += 1) {
+                const s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >>> 3);
+                const s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+                w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
+            }
+            let [a, b, c, d, e, f, g, h] = H;
+            for (let i = 0; i < 64; i += 1) {
+                const t1 = (h + (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)) + ((e & f) ^ (~e & g)) + K[i] + w[i]) >>> 0;
+                const t2 = ((rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))) >>> 0;
+                h = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+            }
+            H[0] += a; H[1] += b; H[2] += c; H[3] += d; H[4] += e; H[5] += f; H[6] += g; H[7] += h;
+        }
+        return Array.from(H).map(x => x.toString(16).padStart(8, "0")).join("");
+    }
+
+    function fwUpload(bytes, sha) {
+        const progress = document.getElementById("fwProgress");
+        return new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open("POST", `/upload/firmware?size=${bytes.length}&sha=${sha}`);
+            xhr.setRequestHeader("Content-Type", "application/octet-stream");
+            xhr.upload.onprogress = e => { if (e.lengthComputable) progress.value = 100 * e.loaded / e.total; };
+            xhr.onload = () => {
+                try { resolve(JSON.parse(xhr.responseText)); } catch (e) { reject(e); }
+            };
+            xhr.onerror = () => reject(new Error("network"));
+            xhr.send(bytes);
+        });
+    }
+
+    async function fwFlash(bytes, expectedSha) {
+        const status = document.getElementById("fwStatus");
+        const progress = document.getElementById("fwProgress");
+        status.textContent = "Checking download...";
+        const sha = sha256Hex(bytes);
+        if (expectedSha && sha !== expectedSha) {
+            status.textContent = "Download damaged (checksum mismatch).";
+            return;
+        }
+        status.textContent = "Sending to the trickler...";
+        progress.value = 0;
+        const result = await fwUpload(bytes, sha);
+        fwInfo = result;
+        if (result.st === "verified") {
+            status.textContent = "Firmware transferred and verified. Restart now to activate it.";
+        } else {
+            status.textContent = result.err === "Leave charge mode first" ? "Please leave charge mode first." : (result.err || "Failed");
+        }
+        document.getElementById("fwApplyButton").classList.toggle("hidden", result.st !== "verified");
+    }
+
+    async function fwInstallUpdate() {
+        if (!fwManifest) return;
+        const status = document.getElementById("fwStatus");
+        const progress = document.getElementById("fwProgress");
+        progress.classList.remove("hidden");
+        try {
+            status.textContent = "Downloading firmware...";
+            progress.value = 0;
+            const bytes = await fwDownload(fwRawUrl("pico2_w.bin"), progress);
+            await fwFlash(bytes, fwManifest.files["pico2_w.bin"].sha256);
+        } catch (e) {
+            status.textContent = "Failed: " + e.message;
+        }
+    }
+
+    async function fwInstallLocal(file) {
+        if (!file) return;
+        document.getElementById("fwProgress").classList.remove("hidden");
+        try {
+            await fwFlash(new Uint8Array(await file.arrayBuffer()), null);
+        } catch (e) {
+            document.getElementById("fwStatus").textContent = "Failed: " + e.message;
+        } finally {
+            document.getElementById("fwFile").value = "";
+        }
+    }
+
+    async function fwApplyUpdate() {
+        const status = document.getElementById("fwStatus");
+        try {
+            await getJson("/rest/fw_apply?go=true");
+        } catch (e) {
+            // The device may already be restarting
+        }
+        status.textContent = "Trickler is restarting...";
+        document.getElementById("fwApplyButton").classList.add("hidden");
+
+        // Wait for the trickler to come back (WiFi reconnect takes a few seconds)
+        const deadline = Date.now() + 90000;
+        await new Promise(r => setTimeout(r, 4000));
+        while (Date.now() < deadline) {
+            try {
+                const info = await getJson("/rest/fw_info");
+                if (info.st !== "rebooting") {
+                    fwInfo = info;
+                    status.textContent = `New firmware running: build ${info.build}.`;
+                    await fwRefreshInfo();
+                    if (fwManifest) await fwCheckUpdate();
+                    return;
+                }
+            } catch (e) {
+                // Not back yet
+            }
+            await new Promise(r => setTimeout(r, 2000));
+        }
+        status.textContent = "The trickler does not come back. Cut the power briefly; if it still does not start, hold BOOTSEL, plug in USB and copy a working UF2 file.";
+    }
+
+    // Open a settings page directly, e.g. /#settings-ai-trickle
+    function onPageLoaded() {
+        const hash = window.location.hash.substring(1);
+        if (hash.startsWith("settings-") && document.getElementById(hash)) {
+            onNavButtonClicked('settings');
+            onSettingsLinkClicked(hash);
+        }
+        else {
+            onNavButtonClicked('trickler');
+        }
+    }
+
     // Start the long polling process when the page loads
     if (document.readyState != "loading") {
-        onNavButtonClicked('trickler');
+        onPageLoaded();
     }
     else {
-        document.addEventListener('DOMContentLoaded', function() {onNavButtonClicked('trickler');});
+        document.addEventListener('DOMContentLoaded', onPageLoaded);
     }
 
 </script>

@@ -41,7 +41,6 @@
         <a role="tab" class="tab" data-tab="overview" onclick="showTab('overview')" data-i18n="tabOverview">Übersicht</a>
         <a role="tab" class="tab" data-tab="learn" onclick="showTab('learn')" data-i18n="tabLearn">Lernen</a>
         <a role="tab" class="tab" data-tab="assistant" onclick="showTab('assistant')" data-i18n="tabAssistant">Assistent</a>
-        <a role="tab" class="tab" data-tab="system" onclick="showTab('system')" data-i18n="tabSystem">System</a>
     </div>
 
     <div id="tab-overview" class="tab-panel grid grid-cols-1 gap-3">
@@ -76,78 +75,20 @@
         </div>
     </div>
 
-    <!-- Mode -->
+    <!-- Mode summary, the settings live in the main portal -->
     <div class="card bg-base-200">
         <div class="card-body p-4">
-            <h2 class="card-title" data-i18n="mode">Modus</h2>
-            <label class="form-control">
-                <div class="label py-1"><span class="label-text" data-i18n="tolerance">Toleranz</span></div>
-                <select id="toleranceSelect" class="select select-bordered select-sm mono" onchange="onLevelInput()">
-                    <option value="0.01">± 0.01 gr</option>
-                    <option value="0.02">± 0.02 gr</option>
-                    <option value="0.03">± 0.03 gr</option>
-                    <option value="0.04">± 0.04 gr</option>
-                    <option value="0.05">± 0.05 gr</option>
-                    <option value="0.06">± 0.06 gr</option>
-                    <option value="0.08">± 0.08 gr</option>
-                    <option value="0.10">± 0.10 gr</option>
-                    <option value="0.15">± 0.15 gr</option>
-                    <option value="0.20">± 0.20 gr</option>
-                </select>
-            </label>
-            <div class="flex justify-between text-sm mt-2">
-                <span data-i18n="careful">Sorgfältig</span>
-                <span><span data-i18n="tempo">Tempo</span> <b id="speedValue" class="mono">-</b></span>
-                <span data-i18n="fast">Schnell</span>
+            <div class="flex justify-between items-center">
+                <h2 class="card-title" data-i18n="mode">Modus</h2>
+                <a class="btn btn-sm" href="/#settings-ai-trickle" data-i18n="settings">Einstellungen</a>
             </div>
-            <input id="levelSlider" type="range" min="0" max="100" value="50" step="5" class="range range-primary" oninput="onLevelInput()"/>
-            <div class="flex justify-between text-xs opacity-70">
-                <span>0</span><span>25</span><span>50</span><span>75</span><span>100</span>
-            </div>
-            <label class="label cursor-pointer justify-start gap-3">
-                <input id="autoSpeedToggle" type="checkbox" class="toggle toggle-primary" onchange="onLevelInput()"/>
-                <span class="label-text" data-i18n="autoSpeed">Auto-Tempo (pro Profil)</span>
-            </label>
-            <div id="autoSpeedInfo" class="text-xs opacity-80"></div>
-            <div class="grid grid-cols-2 gap-2 mono text-sm mt-1">
-                <div><span data-i18n="tolerance">Toleranz</span>: <b id="levelTolerance">-</b></div>
+            <div class="grid grid-cols-2 gap-2 mono text-sm">
+                <div><span data-i18n="tolerance">Toleranz</span>: <b id="modeTolerance">-</b></div>
+                <div><span data-i18n="tempo">Tempo</span>: <b id="modeSpeed">-</b></div>
+                <div><span data-i18n="adaptive">Adaptiver Regler</span>: <b id="modeEnabled">-</b></div>
                 <div><span data-i18n="estTime">Geschätzte Zeit</span>: <b id="levelTime">-</b></div>
             </div>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-1 mt-2">
-                <label class="label cursor-pointer justify-start gap-3">
-                    <input id="enableToggle" type="checkbox" class="toggle toggle-primary" />
-                    <span class="label-text" data-i18n="adaptive">Adaptiver Regler</span>
-                </label>
-                <label class="label cursor-pointer justify-start gap-3">
-                    <input id="autoLearnToggle" type="checkbox" class="toggle toggle-primary" />
-                    <span class="label-text" data-i18n="autoLearn">Ständig weiterlernen</span>
-                </label>
-            </div>
-            <div class="card-actions justify-end">
-                <button class="btn btn-primary btn-sm" onclick="saveConfig()" data-i18n="save">Speichern</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Motor speed limits of the profile -->
-    <div class="card bg-base-200">
-        <div class="card-body p-4">
-            <h2 class="card-title" data-i18n="limits">Motor-Grenzen des Profils</h2>
-            <p class="text-sm opacity-80" data-i18n="limitsHelp">Die Höchstdrehzahlen begrenzen die Wurfzeit am stärksten. Die AI nutzt die PID-Werte und Stopp-Schwellen nicht, nur diese Grenzen.</p>
-            <div class="grid grid-cols-2 gap-2">
-                <label class="form-control"><div class="label py-1"><span class="label-text" data-i18n="coarseMax">Grob max (U/s)</span></div>
-                    <input id="limitCoarseMax" type="number" step="0.5" min="0.1" class="input input-bordered input-sm mono" oninput="onLevelInput()"/></label>
-                <label class="form-control"><div class="label py-1"><span class="label-text" data-i18n="fineMax">Fein max (U/s)</span></div>
-                    <input id="limitFineMax" type="number" step="0.1" min="0.05" class="input input-bordered input-sm mono" oninput="onLevelInput()"/></label>
-                <label class="form-control"><div class="label py-1"><span class="label-text" data-i18n="coarseMin">Grob min (U/s)</span></div>
-                    <input id="limitCoarseMin" type="number" step="0.01" min="0" class="input input-bordered input-sm mono"/></label>
-                <label class="form-control"><div class="label py-1"><span class="label-text" data-i18n="fineMin">Fein min (U/s)</span></div>
-                    <input id="limitFineMin" type="number" step="0.01" min="0" class="input input-bordered input-sm mono"/></label>
-            </div>
-            <div id="limitsHint" class="text-xs opacity-80"></div>
-            <div class="card-actions justify-end">
-                <button class="btn btn-primary btn-sm" onclick="saveLimits()" data-i18n="save">Speichern</button>
-            </div>
+            <div id="autoSpeedInfo" class="text-xs opacity-80"></div>
         </div>
     </div>
 
@@ -330,55 +271,6 @@
 
     </div>
 
-    <div id="tab-system" class="tab-panel grid grid-cols-1 gap-3 hidden">
-    <!-- Scale diagnostics -->
-    <div class="card bg-base-200">
-        <div class="card-body p-4">
-            <h2 class="card-title" data-i18n="diag">Waagen-Diagnose</h2>
-            <p class="text-sm opacity-80" data-i18n="diagHelp">-</p>
-            <div class="join">
-                <select id="diagSeconds" class="select select-bordered select-sm join-item">
-                    <option value="10">10 s</option>
-                    <option value="20" selected>20 s</option>
-                    <option value="60">60 s</option>
-                </select>
-                <button class="btn btn-primary btn-sm join-item" onclick="startDiag()" data-i18n="diagStart">Messen</button>
-            </div>
-            <progress id="diagProgress" class="progress progress-primary w-full" value="0" max="100"></progress>
-            <div id="diagResult" class="grid grid-cols-2 sm:grid-cols-3 gap-2 mono text-sm"></div>
-            <ul id="diagVerdict" class="text-sm list-disc pl-5"></ul>
-        </div>
-    </div>
-
-    <!-- Firmware update -->
-    <div class="card bg-base-200">
-        <div class="card-body p-4">
-            <h2 class="card-title" data-i18n="fw">Firmware-Update</h2>
-            <div id="fwInstalled" class="grid grid-cols-2 gap-2 mono text-sm"></div>
-            <div id="fwSetup" class="alert hidden text-sm"></div>
-            <details>
-                <summary class="text-sm" data-i18n="fwSource">Quelle</summary>
-                <input id="fwRepo" type="text" class="input input-bordered input-sm w-full mt-2" placeholder="owner/repo" />
-            </details>
-            <div class="flex flex-wrap gap-2">
-                <button class="btn btn-sm" onclick="checkUpdate()" data-i18n="fwCheck">Nach Update suchen</button>
-                <label class="btn btn-sm">
-                    <span data-i18n="fwLocal">Datei hochladen</span>
-                    <input id="fwFile" type="file" accept=".bin" class="hidden" onchange="installLocalFirmware(this.files[0])" />
-                </label>
-            </div>
-            <div id="fwAvailable" class="text-sm"></div>
-            <progress id="fwProgress" class="progress progress-primary w-full hidden" value="0" max="100"></progress>
-            <div id="fwStatus" class="text-sm"></div>
-            <div class="card-actions justify-end">
-                <button id="fwInstallButton" class="btn btn-primary btn-sm hidden" onclick="installUpdate()" data-i18n="fwInstall">Installieren</button>
-                <button id="fwApplyButton" class="btn btn-warning btn-sm hidden" onclick="applyUpdate()" data-i18n="fwApply">Neu starten &amp; aktivieren</button>
-            </div>
-        </div>
-    </div>
-
-    </div>
-
     <div id="toast" class="toast toast-end"></div>
 </div>
 
@@ -391,13 +283,8 @@ const I18N = {
         status: "Status", profile: "Profil", weight: "Gewicht", predicted: "Vorhersage", lastThrow: "Letzter Wurf",
         mode: "Modus", precision: "Genauigkeit", speed: "Geschwindigkeit", tolerance: "Toleranz", estTime: "Geschätzte Zeit",
         careful: "Sorgfältig", fast: "Schnell", tempo: "Tempo", autoSpeed: "Auto-Tempo (pro Profil)",
-        autoSpeedInfo: "Gelerntes Tempo {speed} für dieses Profil · Überwürfe {over} % · Nachtrickeln {topups}/Wurf · bestes Tempo {best} ({bestTime})",
-        autoSpeedFresh: "Startet bei Tempo {speed} und wird nach jeder Ladung angepasst.",
-        limits: "Motor-Grenzen des Profils",
-        limitsHelp: "Die Höchstdrehzahlen begrenzen die Wurfzeit am stärksten. Die AI nutzt die PID-Werte und Stopp-Schwellen nicht, nur diese Grenzen.",
-        coarseMax: "Grob max (U/s)", fineMax: "Fein max (U/s)", coarseMin: "Grob min (U/s)", fineMin: "Fein min (U/s)",
-        limitsFlow: "Mit dem gelernten Modell: Grob {coarse} gr/s, Fein {fine} gr/s.",
-        limitsMotor: "Achtung: der Motor selbst ist auf {max} U/s begrenzt (Motor-Einstellungen).",
+        settings: "Einstellungen", on: "Ein", off: "Aus", autoShort: "Auto",
+        autoSpeedInfo: "Gelerntes Tempo {speed} für dieses Profil · Überwürfe {over} % · Nachtrickeln {topups}/Wurf · bestes Tempo {best} ({bestTime})", fineMax: "Fein max (U/s)", coarseMin: "Grob min (U/s)", fineMin: "Fein min (U/s)",
         adaptive: "Adaptiver Regler", autoLearn: "Ständig weiterlernen", save: "Speichern",
         learn: "Profil einlernen",
         learnHelp: "Der Trickler wirft Probe-Pulse und mehrere Ladungen, misst dabei Fördermenge, Fallzeit, Nachlauf und Streuung und stellt sich selbst ein. Leere die Waagschale nach jedem Wurf.",
@@ -436,13 +323,8 @@ const I18N = {
         status: "Status", profile: "Profile", weight: "Weight", predicted: "Predicted", lastThrow: "Last throw",
         mode: "Mode", precision: "Precision", speed: "Speed", tolerance: "Tolerance", estTime: "Estimated time",
         careful: "Careful", fast: "Fast", tempo: "Speed", autoSpeed: "Auto speed (per profile)",
-        autoSpeedInfo: "Learned speed {speed} for this profile · over charges {over} % · top ups {topups}/charge · best speed {best} ({bestTime})",
-        autoSpeedFresh: "Starts at speed {speed} and adapts after every charge.",
-        limits: "Motor limits of the profile",
-        limitsHelp: "The maximum speeds limit the charge time the most. The AI ignores the PID values and stop thresholds, it only uses these limits.",
-        coarseMax: "Coarse max (rev/s)", fineMax: "Fine max (rev/s)", coarseMin: "Coarse min (rev/s)", fineMin: "Fine min (rev/s)",
-        limitsFlow: "With the learned model: coarse {coarse} gr/s, fine {fine} gr/s.",
-        limitsMotor: "Note: the motor itself is limited to {max} rev/s (motor settings).",
+        settings: "Settings", on: "On", off: "Off", autoShort: "auto",
+        autoSpeedInfo: "Learned speed {speed} for this profile · over charges {over} % · top ups {topups}/charge · best speed {best} ({bestTime})", fineMax: "Fine max (rev/s)", coarseMin: "Coarse min (rev/s)", fineMin: "Fine min (rev/s)",
         adaptive: "Adaptive controller", autoLearn: "Keep learning", save: "Save",
         learn: "Learn profile",
         learnHelp: "The trickler throws probe pulses and several charges, measures flow per revolution, flight time, tail and spread, and tunes itself. Empty the pan after each throw.",
@@ -481,7 +363,7 @@ const I18N = {
 
 
 Object.assign(I18N.de, {
-    tabOverview: "Übersicht", tabLearn: "Lernen", tabAssistant: "Assistent", tabSystem: "System",
+    tabOverview: "Übersicht", tabLearn: "Lernen", tabAssistant: "Assistent",
     exportCsv: "CSV", backup: "Sicherung",
     backupHelp: "Gelernte Modelle aller Profile als Datei sichern oder wiederherstellen, oder das Modell eines anderen Profils in das aktuelle übernehmen.",
     exportBackup: "Exportieren", importBackup: "Importieren", copyModel: "Übernehmen", copyFrom: "Modell übernehmen von:",
@@ -495,33 +377,9 @@ Object.assign(I18N.de, {
     seriesInvalid: "Bitte gültige Werte eingeben (max. 100 Ladungen, Schritt höchstens 2 gr).",
     confirmLadder: "Leiter mit diesen Ladungen starten?\n{list}",
     rung: "Stufe", charges: "Ladungen",
-    diag: "Waagen-Diagnose",
-    diagHelp: "Misst die leere oder ruhig belastete Waage: wie oft sie sendet, wie stark sie rauscht und ob sie driftet. Nur außerhalb des Lademodus; nichts berühren während der Messung.",
-    diagStart: "Messen", diagRate: "Messrate", diagNoise: "Rauschen", diagDrift: "Drift", diagRange: "Spanne", diagJump: "Größter Sprung",
-    diagResolution: "Auflösung", diagAborted: "Abgebrochen (Lademodus gestartet).",
-    diagRateLow: "Die Waage sendet nur {hz} Messwerte/s. Stelle die Datenausgabe auf Stream mit der schnellsten Rate, sonst reagiert der Trickler träge.",
-    diagNoiseHigh: "Unruhige Anzeige (±{sd} gr): Zugluft oder Vibration. Windschutz schließen, Waage auf eine feste, schwere Unterlage, Motoren entkoppeln.",
-    diagNoiseOk: "Rauschen gering – gute Bedingungen.",
-    diagDriftHigh: "Die Waage driftet um {d} gr/min. Waage mind. 30 min aufwärmen lassen, Temperatur konstant halten, ggf. neu kalibrieren.",
-    diagJumpHigh: "Einzelne Sprünge bis {j} gr trotz ruhiger Anzeige: Stöße, Kabel unter Zug oder statische Aufladung prüfen.",
-    diagAllGood: "Alles im grünen Bereich.",
-    fw: "Firmware-Update", fwSource: "Quelle (GitHub-Repository)", fwCheck: "Nach Update suchen", fwLocal: "Datei hochladen",
-    fwInstall: "Installieren", fwApply: "Neu starten & aktivieren",
-    fwBoard: "Board", fwVersion: "Version", fwBuild: "Build", fwPartition: "Partition",
-    fwNotSupported: "Updates über WLAN gibt es nur für den Pico 2 W. Für den Pico W bitte die UF2-Datei per USB aufspielen.",
-    fwSetupNeeded: "Einmalige Einrichtung per USB nötig: 1. BOOTSEL gedrückt halten und USB einstecken. 2. {pt} auf das Laufwerk ziehen, der Pico startet neu und erscheint wieder als Laufwerk. 3. {app} darauf ziehen. Danach gehen alle Updates über WLAN. Einstellungen bleiben erhalten (EEPROM).",
-    fwUpToDate: "Aktuell (Build {build}).", fwNewer: "Update verfügbar: Build {build} ({date}).",
-    fwNoManifest: "Keine Firmware im Repository gefunden. Sind die GitHub Actions im Fork aktiviert?",
-    fwDownloading: "Lade Firmware...", fwChecking: "Prüfe Download...", fwUploading: "Übertrage zum Trickler...",
-    fwVerified: "Firmware übertragen und geprüft. Jetzt neu starten, um sie zu aktivieren.",
-    fwBadDownload: "Download beschädigt (Prüfsumme falsch).", fwRebooting: "Trickler startet neu...",
-    fwRebooted: "Neue Firmware läuft: Build {build}{conf}.", fwConfirmed: ", bestätigt",
-    fwNoReturn: "Trickler meldet sich nicht zurück. Notfalls kurz Strom trennen, die alte Firmware startet dann automatisch wieder.",
-    fwLeaveCharge: "Bitte zuerst den Lademodus verlassen.",
-    fwRunning: "Gerade aktiv",
 });
 Object.assign(I18N.en, {
-    tabOverview: "Overview", tabLearn: "Learn", tabAssistant: "Assistant", tabSystem: "System",
+    tabOverview: "Overview", tabLearn: "Learn", tabAssistant: "Assistant",
     exportCsv: "CSV", backup: "Backup",
     backupHelp: "Save or restore the learned models of all profiles as a file, or take over the model of another profile into the current one.",
     exportBackup: "Export", importBackup: "Import", copyModel: "Copy", copyFrom: "Copy model from:",
@@ -535,30 +393,6 @@ Object.assign(I18N.en, {
     seriesInvalid: "Please enter valid values (max. 100 charges, step at most 2 gr).",
     confirmLadder: "Start the ladder with these charges?\n{list}",
     rung: "Rung", charges: "Charges",
-    diag: "Scale diagnostics",
-    diagHelp: "Measures the empty or steadily loaded scale: how often it reports, how much it fluctuates and whether it drifts. Only outside charge mode; do not touch anything while measuring.",
-    diagStart: "Measure", diagRate: "Rate", diagNoise: "Noise", diagDrift: "Drift", diagRange: "Range", diagJump: "Largest jump",
-    diagResolution: "Resolution", diagAborted: "Aborted (charge mode started).",
-    diagRateLow: "The scale only sends {hz} readings/s. Set the data output to stream at the fastest rate, otherwise the trickler reacts slowly.",
-    diagNoiseHigh: "Unsteady reading (±{sd} gr): draft or vibration. Close the draft shield, put the scale on a solid heavy base, decouple the motors.",
-    diagNoiseOk: "Low noise - good conditions.",
-    diagDriftHigh: "The scale drifts by {d} gr/min. Let it warm up for at least 30 min, keep the temperature constant, recalibrate if needed.",
-    diagJumpHigh: "Single jumps up to {j} gr despite a calm reading: check for bumps, cable tension or static charge.",
-    diagAllGood: "Everything looks good.",
-    fw: "Firmware update", fwSource: "Source (GitHub repository)", fwCheck: "Check for updates", fwLocal: "Upload file",
-    fwInstall: "Install", fwApply: "Restart & activate",
-    fwBoard: "Board", fwVersion: "Version", fwBuild: "Build", fwPartition: "Partition",
-    fwNotSupported: "Updates over WiFi are only available for the Pico 2 W. For the Pico W please flash the UF2 file over USB.",
-    fwSetupNeeded: "One-time setup over USB required: 1. Hold BOOTSEL and plug in USB. 2. Drag {pt} onto the drive, the Pico restarts and shows up as a drive again. 3. Drag {app} onto it. After that all updates go over WiFi. Settings are kept (EEPROM).",
-    fwUpToDate: "Up to date (build {build}).", fwNewer: "Update available: build {build} ({date}).",
-    fwNoManifest: "No firmware found in the repository. Are GitHub Actions enabled for the fork?",
-    fwDownloading: "Downloading firmware...", fwChecking: "Checking download...", fwUploading: "Sending to the trickler...",
-    fwVerified: "Firmware transferred and verified. Restart now to activate it.",
-    fwBadDownload: "Download damaged (checksum mismatch).", fwRebooting: "Trickler is restarting...",
-    fwRebooted: "New firmware running: build {build}{conf}.", fwConfirmed: ", confirmed",
-    fwNoReturn: "The trickler does not come back. If needed, cut the power briefly, the previous firmware then starts again automatically.",
-    fwLeaveCharge: "Please leave charge mode first.",
-    fwRunning: "Running",
 });
 
 let lang = "de";
@@ -585,7 +419,6 @@ function setLanguage(newLang) {
     document.getElementById("langSelect").value = lang;
     setSeriesMode(seriesLadder);
     renderAll();
-    renderDiag();
 }
 
 // ---------------------------------------------------------------------------
@@ -659,10 +492,13 @@ async function refreshDeviceSettings() {
         state.chargeConfig = await getJson("/rest/charge_mode_config");
         state.coarseMotor = await getJson("/rest/coarse_motor_config");
         state.fineMotor = await getJson("/rest/fine_motor_config");
+        // Last scale diagnostics result (measured under Settings -> Scale), context for Claude
+        const diag = await getJson("/rest/scale_diag");
+        state.diag = diag.st >= 2 ? diag : null;
     } catch (e) {
         console.warn(e);
     }
-    renderLimits();
+    renderModeSummary();
 }
 
 async function refreshHistory() {
@@ -731,21 +567,6 @@ function modeParams(speed, tolerance) {
     };
 }
 
-// Values the user is editing, falling back to the device
-function editedLimits() {
-    const p = state.profile;
-    if (!p) return null;
-    const num = (id, fallback) => {
-        const v = parseFloat(document.getElementById(id).value);
-        return v > 0 ? v : fallback;
-    };
-    return {coarseMax: num("limitCoarseMax", p.p7), fineMax: num("limitFineMax", p.p12), fineMin: p.p11};
-}
-
-function selectedTolerance() {
-    return parseFloat(document.getElementById("toleranceSelect").value) || (state.config ? state.config.a5 : 0.02);
-}
-
 // Model based estimate, calibrated with the learned mean charge time when available
 function estimateTime(speed, tolerance, limits) {
     const raw = estimateTimeRaw(speed, tolerance, limits);
@@ -782,106 +603,21 @@ function estimateTimeRaw(speed, tolerance, limits) {
     return time + m.lat + 0.6;
 }
 
-function onLevelInput() {
-    const speed = Number(document.getElementById("levelSlider").value);
-    const tolerance = selectedTolerance();
-    document.getElementById("speedValue").textContent = speed;
-    document.getElementById("levelTolerance").textContent = "±" + tolerance.toFixed(2) + " gr";
-    const est = estimateTime(speed, tolerance, editedLimits());
-    document.getElementById("levelTime").textContent = est ? "≈ " + est.toFixed(0) + " s" : "-";
-    renderAutoSpeedInfo();
-    renderLimitsHint();
-}
-
-function renderAutoSpeedInfo() {
+function renderModeSummary() {
     const c = state.config;
-    const el = document.getElementById("autoSpeedInfo");
-    if (!c || !document.getElementById("autoSpeedToggle").checked) {
-        el.textContent = "";
-        return;
-    }
-    const a = c.as || [0, 0, 0, c.sp, 0];
-    if (!c.a4) {
-        el.textContent = t("autoSpeedFresh", {speed: document.getElementById("levelSlider").value});
-        return;
-    }
-    el.textContent = t("autoSpeedInfo", {
+    if (!c) return;
+    document.getElementById("modeTolerance").textContent = "±" + Number(c.a5).toFixed(2) + " gr";
+    document.getElementById("modeSpeed").textContent = c.sp + (c.a4 ? " (" + t("autoShort") + ")" : "");
+    document.getElementById("modeEnabled").textContent = c.a0 ? t("on") : t("off");
+    const est = estimateTime(c.sp, c.a5, null);
+    document.getElementById("levelTime").textContent = est ? "≈ " + est.toFixed(0) + " s" : "-";
+
+    const info = document.getElementById("autoSpeedInfo");
+    const a = c.as;
+    info.textContent = c.a4 && a ? t("autoSpeedInfo", {
         speed: c.sp, over: fmt(a[0] * 100, 0), topups: fmt(a[1], 1), best: a[3],
         bestTime: a[4] > 0 ? fmt(a[4], 1) + " s" : "-",
-    });
-}
-
-async function saveConfig() {
-    const speed = document.getElementById("levelSlider").value;
-    const enable = document.getElementById("enableToggle").checked;
-    const auto = document.getElementById("autoLearnToggle").checked;
-    const autoSpeed = document.getElementById("autoSpeedToggle").checked;
-    const tolerance = selectedTolerance().toFixed(3);
-    try {
-        // In auto mode the slider restarts the tuning of this profile from the chosen speed
-        let speedParam = `a1=${speed}`;
-        if (autoSpeed && state.config && (!state.config.a4 || Number(speed) !== state.config.sp)) {
-            speedParam = `a6=${speed}`;
-        }
-        await getJson(`/rest/ai_config?a0=${enable}&a2=${auto}&a4=${autoSpeed}&a5=${tolerance}&${speedParam}&ee=true`);
-        await refreshConfig();
-        toast(t("saved"));
-    } catch (e) {
-        toast(t("failed"), "error");
-    }
-}
-
-function renderLimits() {
-    const p = state.profile;
-    if (!p) return;
-    const set = (id, v) => {
-        const el = document.getElementById(id);
-        if (document.activeElement !== el) el.value = v;
-    };
-    set("limitCoarseMax", p.p7);
-    set("limitFineMax", p.p12);
-    set("limitCoarseMin", p.p6);
-    set("limitFineMin", p.p11);
-    onLevelInput();
-}
-
-function renderLimitsHint() {
-    const el = document.getElementById("limitsHint");
-    const m = state.model;
-    const lim = editedLimits();
-    if (!lim) {
-        el.textContent = "";
-        return;
-    }
-    const parts = [];
-    if (m && state.config && state.config.rd) {
-        parts.push(t("limitsFlow", {coarse: fmt(m.kc * lim.coarseMax, 1), fine: fmt(m.kf * lim.fineMax, 2)}));
-    }
-    const motorMax = Math.min(
-        state.coarseMotor && lim.coarseMax > state.coarseMotor.m4 ? state.coarseMotor.m4 : Infinity,
-        state.fineMotor && lim.fineMax > state.fineMotor.m4 ? state.fineMotor.m4 : Infinity);
-    if (motorMax !== Infinity) {
-        parts.push(t("limitsMotor", {max: motorMax}));
-    }
-    el.textContent = parts.join(" ");
-}
-
-async function saveLimits() {
-    if (!state.config) return;
-    const v = id => parseFloat(String(document.getElementById(id).value).replace(",", "."));
-    const values = {p6: v("limitCoarseMin"), p7: v("limitCoarseMax"), p11: v("limitFineMin"), p12: v("limitFineMax")};
-    if (!(values.p7 > values.p6) || !(values.p12 > values.p11) || values.p6 < 0 || values.p11 < 0) {
-        toast(t("failed"), "error");
-        return;
-    }
-    try {
-        const query = Object.entries(values).map(([k, x]) => `${k}=${x}`).join("&");
-        await getJson(`/rest/profile_config?pf=${state.config.pf}&${query}&ee=true`);
-        await refreshDeviceSettings();
-        toast(t("saved"));
-    } catch (e) {
-        toast(t("failed"), "error");
-    }
+    }) : "";
 }
 
 // ---------------------------------------------------------------------------
@@ -949,25 +685,11 @@ function renderConfig() {
     const c = state.config;
     if (!c) return;
     document.getElementById("profileName").textContent = c.pn;
-    const slider = document.getElementById("levelSlider");
-    if (document.activeElement !== slider) slider.value = c.a4 ? c.sp : c.a1;
-    const toleranceSelect = document.getElementById("toleranceSelect");
-    if (document.activeElement !== toleranceSelect) {
-        // Pick the closest choice, the device may hold any value set via REST
-        let best = toleranceSelect.options[0];
-        for (const o of toleranceSelect.options) {
-            if (Math.abs(o.value - c.a5) < Math.abs(best.value - c.a5)) best = o;
-        }
-        toleranceSelect.value = best.value;
-    }
-    document.getElementById("autoSpeedToggle").checked = c.a4;
-    document.getElementById("enableToggle").checked = c.a0;
-    document.getElementById("autoLearnToggle").checked = c.a2;
     const learnThrows = document.getElementById("learnThrows");
     if (document.activeElement !== learnThrows) learnThrows.value = c.a3;
     const learnWeight = document.getElementById("learnWeight");
     if (!learnWeight.value && c.tg > 0) learnWeight.value = c.tg.toFixed(2);
-    onLevelInput();
+    renderModeSummary();
     renderBadge();
 }
 
@@ -1630,47 +1352,6 @@ function showTab(name) {
 }
 
 // ---------------------------------------------------------------------------
-// SHA-256 (crypto.subtle is not available on plain http pages)
-// ---------------------------------------------------------------------------
-function sha256Hex(bytes) {
-    const K = new Uint32Array([
-        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2]);
-    const H = new Uint32Array([0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]);
-    const length = bytes.length;
-    const padded = new Uint8Array(((length + 9 + 63) >> 6) << 6);
-    padded.set(bytes);
-    padded[length] = 0x80;
-    const view = new DataView(padded.buffer);
-    view.setUint32(padded.length - 8, Math.floor(length / 0x20000000), false);
-    view.setUint32(padded.length - 4, (length << 3) >>> 0, false);
-    const w = new Uint32Array(64);
-    const rotr = (x, n) => (x >>> n) | (x << (32 - n));
-    for (let offset = 0; offset < padded.length; offset += 64) {
-        for (let i = 0; i < 16; i += 1) w[i] = view.getUint32(offset + i * 4, false);
-        for (let i = 16; i < 64; i += 1) {
-            const s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >>> 3);
-            const s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >>> 10);
-            w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
-        }
-        let [a, b, c, d, e, f, g, h] = H;
-        for (let i = 0; i < 64; i += 1) {
-            const t1 = (h + (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)) + ((e & f) ^ (~e & g)) + K[i] + w[i]) >>> 0;
-            const t2 = ((rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))) >>> 0;
-            h = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0;
-        }
-        H[0] += a; H[1] += b; H[2] += c; H[3] += d; H[4] += e; H[5] += f; H[6] += g; H[7] += h;
-    }
-    return Array.from(H).map(x => x.toString(16).padStart(8, "0")).join("");
-}
-
-// ---------------------------------------------------------------------------
 // CSV export
 // ---------------------------------------------------------------------------
 function downloadFile(name, content, type) {
@@ -1921,262 +1602,21 @@ async function copyModel() {
 }
 
 // ---------------------------------------------------------------------------
-// Scale diagnostics
-// ---------------------------------------------------------------------------
-async function startDiag() {
-    const seconds = document.getElementById("diagSeconds").value;
-    try {
-        const r = await getJson(`/rest/scale_diag?go=true&s=${seconds}`);
-        if (r.err) {
-            toast(r.err === "Leave charge mode first" ? t("fwLeaveCharge") : r.err, "error");
-            return;
-        }
-        state.diag = r;
-        pollDiag();
-    } catch (e) {
-        toast(t("failed"), "error");
-    }
-}
-
-async function pollDiag() {
-    try {
-        state.diag = await getJson("/rest/scale_diag");
-        renderDiag();
-        if (state.diag.st === 1) setTimeout(pollDiag, 1000);
-    } catch (e) {
-        setTimeout(pollDiag, 2000);
-    }
-}
-
-function renderDiag() {
-    const d = state.diag;
-    if (!d) return;
-    document.getElementById("diagProgress").value = d.st === 1 ? 100 * d.el / d.dur : (d.st >= 2 ? 100 : 0);
-    if (d.st < 2) return;
-    document.getElementById("diagResult").innerHTML =
-        `<div>${t("diagRate")}: <b>${fmt(d.hz, 1)} Hz</b></div>` +
-        `<div>${t("diagNoise")}: <b>±${fmt(d.sd, 4)} gr</b></div>` +
-        `<div>${t("diagDrift")}: <b>${signed(d.drift, 3)} gr/min</b></div>` +
-        `<div>${t("diagRange")}: <b>${fmt(d.min, 2)} … ${fmt(d.max, 2)}</b></div>` +
-        `<div>${t("diagJump")}: <b>${fmt(d.jump, 3)} gr</b></div>` +
-        `<div>${t("diagResolution")}: <b>${fmt(d.res, 3)} gr</b></div>`;
-
-    const verdict = [];
-    if (d.st === 3) verdict.push(t("diagAborted"));
-    if (d.hz !== null && d.hz < 5) verdict.push(t("diagRateLow", {hz: fmt(d.hz, 1)}));
-    if (d.sd !== null && d.sd > 0.012) verdict.push(t("diagNoiseHigh", {sd: fmt(d.sd, 3)}));
-    else if (d.sd !== null) verdict.push(t("diagNoiseOk"));
-    if (d.drift !== null && Math.abs(d.drift) > 0.02) verdict.push(t("diagDriftHigh", {d: signed(d.drift, 3)}));
-    if (d.jump !== null && d.sd !== null && d.jump > 0.1 && d.sd < 0.012) verdict.push(t("diagJumpHigh", {j: fmt(d.jump, 2)}));
-    if (verdict.length === 1 && verdict[0] === t("diagNoiseOk")) verdict.push(t("diagAllGood"));
-    document.getElementById("diagVerdict").innerHTML = verdict.map(v => `<li>${v}</li>`).join("");
-}
-
-// ---------------------------------------------------------------------------
-// Firmware update
-// ---------------------------------------------------------------------------
-const FW_REPO_STORE = "aiFirmwareRepo";
-const FW_DEFAULT_REPO = "Dud3z/opentrickler-rp2040-controller";
-let fwManifest = null;
-
-function fwRepo() {
-    const input = document.getElementById("fwRepo");
-    const repo = (input.value || "").trim() || FW_DEFAULT_REPO;
-    try { localStorage.setItem(FW_REPO_STORE, repo); } catch (e) {}
-    return repo;
-}
-
-function fwRawUrl(file) {
-    return `https://raw.githubusercontent.com/${fwRepo()}/firmware/${file}`;
-}
-
-async function refreshFwInfo() {
-    try {
-        state.fw = await getJson("/rest/fw_info");
-    } catch (e) {
-        return;
-    }
-    const f = state.fw;
-    document.getElementById("fwInstalled").innerHTML =
-        `<div>${t("fwBoard")}: <b>${f.board}</b></div>` +
-        `<div>${t("fwVersion")}: <b>${f.ver}</b></div>` +
-        `<div>${t("fwBuild")}: <b>${f.build}</b></div>` +
-        `<div>${t("fwPartition")}: <b>${f.part < 0 ? "-" : (f.part === 0 ? "A" : "B")}</b></div>`;
-
-    const setup = document.getElementById("fwSetup");
-    if (!f.sup) {
-        setup.textContent = t("fwNotSupported");
-        setup.classList.remove("hidden");
-    } else if (!f.ab) {
-        setup.innerHTML = t("fwSetupNeeded", {
-            pt: `<a class="link" href="${fwRawUrl("pico2_w_partition_table.uf2")}" download>pico2_w_partition_table.uf2</a>`,
-            app: `<a class="link" href="${fwRawUrl("pico2_w.uf2")}" download>pico2_w.uf2</a>`,
-        });
-        setup.classList.remove("hidden");
-    } else {
-        setup.classList.add("hidden");
-    }
-    document.getElementById("fwApplyButton").classList.toggle("hidden", f.st !== "verified");
-}
-
-async function checkUpdate() {
-    const out = document.getElementById("fwAvailable");
-    try {
-        const response = await fetch(fwRawUrl("manifest.json") + "?t=" + Date.now(), {cache: "no-store"});
-        if (!response.ok) throw new Error(response.status);
-        fwManifest = await response.json();
-    } catch (e) {
-        fwManifest = null;
-        out.textContent = t("fwNoManifest");
-        document.getElementById("fwInstallButton").classList.add("hidden");
-        return;
-    }
-    await refreshFwInfo();
-    const m = fwManifest;
-    const newer = state.fw && m.build > state.fw.build;
-    const notes = (m.notes || []).slice(0, 8).map(n => `<li>${n.replace(/</g, "&lt;")}</li>`).join("");
-    out.innerHTML = `<b>${newer ? t("fwNewer", {build: m.build, date: m.date.slice(0, 10)}) : t("fwUpToDate", {build: m.build})}</b>` +
-                    `<ul class="list-disc pl-5 opacity-80">${notes}</ul>`;
-    const canInstall = state.fw && state.fw.sup && state.fw.ab && m.files && m.files["pico2_w.bin"];
-    document.getElementById("fwInstallButton").classList.toggle("hidden", !canInstall);
-}
-
-async function downloadWithProgress(url, progress) {
-    const response = await fetch(url, {cache: "no-store"});
-    if (!response.ok || !response.body) throw new Error(String(response.status));
-    const total = Number(response.headers.get("content-length")) || 0;
-    const reader = response.body.getReader();
-    const chunks = [];
-    let received = 0;
-    while (true) {
-        const {done, value} = await reader.read();
-        if (done) break;
-        chunks.push(value);
-        received += value.length;
-        if (total) progress.value = 100 * received / total;
-    }
-    const bytes = new Uint8Array(received);
-    let offset = 0;
-    for (const chunk of chunks) {
-        bytes.set(chunk, offset);
-        offset += chunk.length;
-    }
-    return bytes;
-}
-
-function uploadFirmware(bytes, sha) {
-    const progress = document.getElementById("fwProgress");
-    return new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open("POST", `/upload/firmware?size=${bytes.length}&sha=${sha}`);
-        xhr.setRequestHeader("Content-Type", "application/octet-stream");
-        xhr.upload.onprogress = e => { if (e.lengthComputable) progress.value = 100 * e.loaded / e.total; };
-        xhr.onload = () => {
-            try { resolve(JSON.parse(xhr.responseText)); } catch (e) { reject(e); }
-        };
-        xhr.onerror = () => reject(new Error("network"));
-        xhr.send(bytes);
-    });
-}
-
-async function flashBytes(bytes, expectedSha) {
-    const status = document.getElementById("fwStatus");
-    const progress = document.getElementById("fwProgress");
-    status.textContent = t("fwChecking");
-    const sha = sha256Hex(bytes);
-    if (expectedSha && sha !== expectedSha) {
-        status.textContent = t("fwBadDownload");
-        return;
-    }
-    status.textContent = t("fwUploading");
-    progress.value = 0;
-    const result = await uploadFirmware(bytes, sha);
-    state.fw = result;
-    if (result.st === "verified") {
-        status.textContent = t("fwVerified");
-    } else {
-        status.textContent = result.err === "Leave charge mode first" ? t("fwLeaveCharge") : (result.err || t("failed"));
-    }
-    document.getElementById("fwApplyButton").classList.toggle("hidden", result.st !== "verified");
-}
-
-async function installUpdate() {
-    if (!fwManifest) return;
-    const status = document.getElementById("fwStatus");
-    const progress = document.getElementById("fwProgress");
-    progress.classList.remove("hidden");
-    try {
-        status.textContent = t("fwDownloading");
-        progress.value = 0;
-        const bytes = await downloadWithProgress(fwRawUrl("pico2_w.bin"), progress);
-        await flashBytes(bytes, fwManifest.files["pico2_w.bin"].sha256);
-    } catch (e) {
-        status.textContent = t("failed") + ": " + e.message;
-    }
-}
-
-async function installLocalFirmware(file) {
-    if (!file) return;
-    document.getElementById("fwProgress").classList.remove("hidden");
-    try {
-        await flashBytes(new Uint8Array(await file.arrayBuffer()), null);
-    } catch (e) {
-        document.getElementById("fwStatus").textContent = t("failed") + ": " + e.message;
-    } finally {
-        document.getElementById("fwFile").value = "";
-    }
-}
-
-async function applyUpdate() {
-    const status = document.getElementById("fwStatus");
-    const before = state.fw ? state.fw.build : null;
-    try {
-        await getJson("/rest/fw_apply?go=true");
-    } catch (e) {
-        // The device may already be restarting
-    }
-    status.textContent = t("fwRebooting");
-    document.getElementById("fwApplyButton").classList.add("hidden");
-
-    // Wait for the trickler to come back (WiFi reconnect takes a few seconds)
-    const deadline = Date.now() + 90000;
-    await new Promise(r => setTimeout(r, 4000));
-    while (Date.now() < deadline) {
-        try {
-            const info = await getJson("/rest/fw_info");
-            if (info.st !== "rebooting") {
-                state.fw = info;
-                status.textContent = t("fwRebooted", {build: info.build, conf: info.conf ? t("fwConfirmed") : ""});
-                await refreshFwInfo();
-                if (fwManifest) await checkUpdate();
-                return;
-            }
-        } catch (e) {
-            // Not back yet
-        }
-        await new Promise(r => setTimeout(r, 2000));
-    }
-    status.textContent = t("fwNoReturn");
-}
-
-// ---------------------------------------------------------------------------
 // Start
 // ---------------------------------------------------------------------------
 (async function main() {
     setLanguage(lang);
+    let tab = "overview";
     try {
-        document.getElementById("fwRepo").value = localStorage.getItem(FW_REPO_STORE) || FW_DEFAULT_REPO;
-        showTab(localStorage.getItem("aiTab") || "overview");
-    } catch (e) {
-        showTab("overview");
-    }
+        tab = localStorage.getItem("aiTab") || "overview";
+    } catch (e) {}
+    showTab(document.getElementById("tab-" + tab) ? tab : "overview");
     document.getElementById("modelSelect").value = selectedModel();
     if (apiKey()) document.getElementById("apiKeyInput").placeholder = "••••••••";
 
     try {
         await refreshConfig();
         await refreshDeviceSettings();
-        onLevelInput();
     } catch (e) {
         console.warn(e);
     }

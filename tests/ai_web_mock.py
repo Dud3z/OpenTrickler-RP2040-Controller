@@ -23,6 +23,7 @@ from urllib.parse import parse_qs, urlparse
 
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 HTML_PATH = os.path.join(SCRIPT_DIR, '..', 'src', 'html', 'ai_trickle.html')
+PORTAL_PATH = os.path.join(SCRIPT_DIR, '..', 'src', 'html', 'web_portal.html')
 EXPORT_TOOL = os.path.join(SCRIPT_DIR, 'sim', 'trickle_export')
 
 
@@ -81,7 +82,7 @@ class Handler(BaseHTTPRequestHandler):
         STATE['requests'].append(self.path)
 
         if url.path in ('/ai', '/'):
-            with open(HTML_PATH, 'rb') as fp:
+            with open(HTML_PATH if url.path == '/ai' else PORTAL_PATH, 'rb') as fp:
                 body = fp.read()
             self.send_response(200)
             self.send_header('Content-Type', 'text/html')

@@ -21,7 +21,7 @@ When a tube stops, powder is still falling and the scale only reacts with a dela
 
 ### On the display
 
-Main menu → **AI Trickle**
+Main menu → **Settings** → **AI Trickle**
 
 * **Mode:** speed Precision / Balanced / Speed / Auto (or *Custom* from the web page), tolerance (±0.01 … ±0.20 gr), adaptive controller on/off, keep learning on/off. Confirm with **OK**.
 * **Learn Profile:** choose a profile, enter the charge weight, start. The trickler throws 8 charges by default (adjustable on the web page). Empty the pan after each throw. The display shows `Learn 3/8`. It stops early as soon as the throws are within the tolerance.
@@ -34,11 +34,17 @@ If a profile has not been learned yet, the first charge automatically starts wit
 
 ### Web page
 
-In the web portal, tap **AI** in the bottom bar, or open `http://<trickler-ip>/ai` directly. The page has four tabs: **Overview**, **Learn** (learning, series & ladder, model and backup), **Assistant** (Claude) and **System** (scale diagnostics, firmware update).
+Settings live where all other settings are, in the web portal under **Settings**:
+
+* **Settings → AI Trickle:** on/off, tolerance, auto speed, speed, keep learning, throws per learning session
+* **Settings → Profiles / Charge Mode:** a note says which values the AI uses (the min/max flow speeds) and which only the classic PID controller uses (Kp/Ki/Kd, stop thresholds)
+* **Settings → Scale:** scale diagnostics
+* **Settings → System Control:** firmware update
+
+The **AI** button in the bottom bar (or `http://<trickler-ip>/ai`) opens the analysis page with three tabs: **Overview**, **Learn** (learning, series & ladder, model and backup) and **Assistant** (Claude).
 
 * Live status with predicted final weight
-* Tolerance, speed slider and **Auto speed** with an estimated time (calibrated with your actual times)
-* **Motor limits of the profile:** the max/min speeds of both tubes, with the resulting powder flow and a warning when the motor configuration caps them
+* Current tolerance and speed (with auto speed: learned speed, over charge rate, top ups) and an estimated time, calibrated with your actual times
 * Start and track a learning session
 * Chart of the last throw: measured weight, model curve, coarse stop
 * History with error chart, statistics (mean, spread, % within tolerance, average time); stored in the browser, per profile
@@ -72,7 +78,7 @@ Default model: Claude Opus 5.5. For lower cost choose Sonnet 5.5 or Haiku 5.5.
 
 ### Scale diagnostics
 
-*System* tab → **Scale diagnostics**. Outside charge mode, leave the scale untouched for 10/20/60 s. Result: readings per second, noise (after removing drift), drift per minute, largest jump, resolution, each with a plain verdict, e.g. "draft or vibration" or "let the scale warm up". The results are also passed to Claude.
+*Settings* → **Scale** → **Scale Diagnostics**. Outside charge mode, leave the scale untouched for 10/20/60 s. Result: readings per second, noise (after removing drift), drift per minute, largest jump, resolution, each with a plain verdict, e.g. "draft or vibration" or "let the scale warm up". The results are also passed to Claude.
 
 ### Firmware update over WiFi (Pico 2 W)
 
@@ -86,9 +92,9 @@ If a new firmware does not work, hold BOOTSEL, plug in USB and copy a working UF
 2. Drag `pico2_w_partition_table.uf2` onto it. The Pico restarts and shows up as a drive again.
 3. Drag `pico2_w.uf2` onto it.
 
-Both files are offered on the *System* tab as long as the setup is missing. They are also in the `firmware` branch of your repository.
+Both files are offered under *Settings* → **System Control** as long as the setup is missing. They are also in the `firmware` branch of your repository.
 
-**After that:** *System* → **Check for updates** → **Install** → **Restart & activate**. Your phone or PC downloads the firmware from GitHub, checks it and sends it to the trickler, so the trickler itself does not need internet access. Alternatively, upload a `.bin` file from your computer with **Upload file**.
+**After that:** *Settings* → **System Control** → **Check for Updates** → **Install** → **Restart & Activate**. Your phone or PC downloads the firmware from GitHub, checks it and sends it to the trickler, so the trickler itself does not need internet access. Alternatively, upload a `.bin` file from your computer with **Upload file**.
 
 Charge mode must be off during an update.
 
@@ -119,7 +125,7 @@ No. The adaptive controller does not use the PID gains (Kp/Ki/Kd) or the coarse/
 The charge time is mostly decided by three things:
 
 1. **Max speeds of the profile** (coarse and fine). With the default "AR2209" limits of 8 / 2 rev/s a ball powder flows about 13 gr/s from the coarse tube and 0.5 gr/s from the fine tube. Raising them to 15 / 5 rev/s cuts several seconds. The motor configuration has its own max speed; the lower one wins.
-2. **The scale.** Set the A&D FX to stream at the fastest rate with the fast response setting. Every top up costs about one scale delay plus a settle (1-2 s); scale diagnostics on the *System* tab shows the rate and noise.
+2. **The scale.** Set the A&D FX to stream at the fastest rate with the fast response setting. Every top up costs about one scale delay plus a settle (1-2 s); scale diagnostics under *Settings* → **Scale** shows the rate and noise.
 3. **The powder.** Ball and fine extruded powders can be thrown fast and tight. With coarse stick powders the odd over charge comes from single kernels and clumps, at any speed.
 
 Simulated, 44 gr, ±0.02 gr tolerance, after a learning session (100 charges each, "scale" = reading within ±0.02 gr, "true" = actual powder within ±0.02 gr):

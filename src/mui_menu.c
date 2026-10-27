@@ -369,7 +369,6 @@ fds_t fds_data[] = {
     MUI_STYLE(0)
     MUI_DATA("MU", 
         MUI_10 "Start|"
-        MUI_70 "AI Trickle|"
         MUI_20 "Cleanup|"
         MUI_40 "Wireless|"
         MUI_30 "Settings"
@@ -474,7 +473,7 @@ fds_t fds_data[] = {
         MUI_72 "Learn Profile|"
         MUI_76 "Model Info|"
         MUI_77 "Reset Model|"
-        MUI_1 "<-Return"  // back to main menu
+        MUI_30 "<-Return"  // back to settings
     )
     MUI_XYA("GC", 5, 25, 0) 
     MUI_XYA("GC", 5, 37, 1) 
@@ -596,6 +595,7 @@ fds_t fds_data[] = {
     MUI_DATA("MU", 
         MUI_31 "Scale|"
         MUI_32 "Profile Manager|"
+        MUI_70 "AI Trickle|"
         MUI_37 "EEPROM|"
         MUI_39 "Servo Gate|"
         MUI_35 "Reboot|"
