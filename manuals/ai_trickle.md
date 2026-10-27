@@ -75,7 +75,9 @@ Default model: Claude Opus 5.5. For lower cost choose Sonnet 5.5 or Haiku 5.5.
 
 ### Firmware update over WiFi (Pico 2 W)
 
-The Pico 2 W has two firmware slots (A/B). An update is written into the slot that is not running, checked with SHA-256 and only then started. Each new firmware first runs on trial: if it does not confirm itself within about 16 seconds after starting, the chip automatically returns to the previous firmware. Settings and learned models are stored in the EEPROM and survive every update.
+The Pico 2 W has two firmware slots (A/B). An update is written into the slot that is not running, checked with SHA-256 and only then started. The chip also checks the image hash itself at every start and falls back to the other slot if the image is damaged. Settings and learned models are stored in the EEPROM and survive every update.
+
+If a new firmware does not work, hold BOOTSEL, plug in USB and copy a working UF2.
 
 **One-time setup (USB):**
 
@@ -138,7 +140,7 @@ make -C tests/sim run
 * `tests/sim/` – unit tests, benchmark, data export
 * `tests/ai_web_mock.py` – REST mock for developing the web page
 
-* `src/fw_update.c/.h`, `src/sha256.c/.h` – firmware update (HTTP POST into the free A/B partition, try-before-you-buy)
+* `src/fw_update.c/.h`, `src/sha256.c/.h` – firmware update (HTTP POST into the free A/B partition)
 * `src/scale_diag.c/.h` – scale diagnostics
 * `targets/pico2_w_ab_partitions.json` – partition table, the build creates `pt.uf2` from it
 * `scripts/make_firmware_manifest.py` – collects images + manifest for the `firmware` branch (CI)

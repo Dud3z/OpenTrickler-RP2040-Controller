@@ -19,6 +19,8 @@
 #include "pico/bootrom.h"
 #include "boot/picoboot_constants.h"
 #include "pico/flash.h"
+#include <FreeRTOS.h>
+#include <task.h>
 #define FW_UPDATE_SUPPORTED 1
 #else
 #define FW_UPDATE_SUPPORTED 0
@@ -146,11 +148,20 @@ static void flash_write_sector_unsafe(void * param) {
 
 static bool write_sector(uint32_t offset, const uint8_t * data) {
     sector_write_t w = {.offset = offset, .data = data};
-    return flash_safe_execute(flash_write_sector_unsafe, &w, 2000) == PICO_OK;
+
+    // flash_safe_execute parks the other core; the calling task must not
+    // migrate to that core meanwhile, so pin it for the duration
+    UBaseType_t affinity = vTaskCoreAffinityGet(NULL);
+    vTaskCoreAffinitySet(NULL, 1u << get_core_num());
+    int rc = flash_safe_execute(flash_write_sector_unsafe, &w, 2000);
+    vTaskCoreAffinitySet(NULL, affinity);
+
+    return rc == PICO_OK;
 }
 
 
 void fw_update_confirm_boot(void) {
+#if PICO_CRT0_IMAGE_TYPE_TBYB
     // A "flash update" boot of a try-before-you-buy image has to be confirmed,
     // otherwise the bootrom returns to the previous firmware on the next reset
     if (rom_get_last_boot_type() == BOOT_TYPE_FLASH_UPDATE) {
@@ -158,6 +169,7 @@ void fw_update_confirm_boot(void) {
         fw_boot_confirmed = rc == BOOTROM_OK;
         printf("Firmware update confirmed: %d\n", rc);
     }
+#endif
 }
 
 #else

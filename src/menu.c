@@ -81,9 +81,6 @@ void menu_task(void *p){
     // Create UI element
     mui_t mui;
 
-    // The system is up: confirm a freshly installed firmware update
-    fw_update_confirm_boot();
-
     mui_Init(&mui, display_handler, fds_data, muif_list, muif_cnt);
     mui_GotoForm(&mui, 1, 0);
 
@@ -91,6 +88,9 @@ void menu_task(void *p){
     u8g2_ClearBuffer(display_handler);
     mui_Draw(&mui);
     u8g2_SendBuffer(display_handler);
+
+    // The system is up: confirm a freshly installed firmware update
+    fw_update_confirm_boot();
 
     while (true) {
         if (mui_IsFormActive(&mui)) {

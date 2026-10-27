@@ -133,9 +133,6 @@ target_compile_definitions("${TARGET_NAME}" PRIVATE APP_BUILD_NUMBER=${APP_BUILD
 if (PICO_RP2350)
     target_link_libraries("${TARGET_NAME}" pico_flash hardware_flash boot_uf2_headers boot_picoboot_headers)
 
-    # Unconfirmed updates fall back to the previous firmware
-    target_compile_definitions("${TARGET_NAME}" PRIVATE PICO_CRT0_IMAGE_TYPE_TBYB=1)
-
     # The bootrom boots the partition with the higher version
     pico_set_binary_version("${TARGET_NAME}" MAJOR 1 MINOR ${APP_BUILD_NUMBER})
 
