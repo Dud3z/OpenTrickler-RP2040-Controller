@@ -80,14 +80,35 @@
     <div class="card bg-base-200">
         <div class="card-body p-4">
             <h2 class="card-title" data-i18n="mode">Modus</h2>
-            <div class="flex justify-between text-sm">
-                <span data-i18n="precision">Genauigkeit</span>
-                <span data-i18n="speed">Geschwindigkeit</span>
+            <label class="form-control">
+                <div class="label py-1"><span class="label-text" data-i18n="tolerance">Toleranz</span></div>
+                <select id="toleranceSelect" class="select select-bordered select-sm mono" onchange="onLevelInput()">
+                    <option value="0.01">± 0.01 gr</option>
+                    <option value="0.02">± 0.02 gr</option>
+                    <option value="0.03">± 0.03 gr</option>
+                    <option value="0.04">± 0.04 gr</option>
+                    <option value="0.05">± 0.05 gr</option>
+                    <option value="0.06">± 0.06 gr</option>
+                    <option value="0.08">± 0.08 gr</option>
+                    <option value="0.10">± 0.10 gr</option>
+                    <option value="0.15">± 0.15 gr</option>
+                    <option value="0.20">± 0.20 gr</option>
+                </select>
+            </label>
+            <div class="flex justify-between text-sm mt-2">
+                <span data-i18n="careful">Sorgfältig</span>
+                <span><span data-i18n="tempo">Tempo</span> <b id="speedValue" class="mono">-</b></span>
+                <span data-i18n="fast">Schnell</span>
             </div>
-            <input id="levelSlider" type="range" min="0" max="100" value="0" step="5" class="range range-primary" oninput="onLevelInput()"/>
+            <input id="levelSlider" type="range" min="0" max="100" value="50" step="5" class="range range-primary" oninput="onLevelInput()"/>
             <div class="flex justify-between text-xs opacity-70">
                 <span>0</span><span>25</span><span>50</span><span>75</span><span>100</span>
             </div>
+            <label class="label cursor-pointer justify-start gap-3">
+                <input id="autoSpeedToggle" type="checkbox" class="toggle toggle-primary" onchange="onLevelInput()"/>
+                <span class="label-text" data-i18n="autoSpeed">Auto-Tempo (pro Profil)</span>
+            </label>
+            <div id="autoSpeedInfo" class="text-xs opacity-80"></div>
             <div class="grid grid-cols-2 gap-2 mono text-sm mt-1">
                 <div><span data-i18n="tolerance">Toleranz</span>: <b id="levelTolerance">-</b></div>
                 <div><span data-i18n="estTime">Geschätzte Zeit</span>: <b id="levelTime">-</b></div>
@@ -104,6 +125,28 @@
             </div>
             <div class="card-actions justify-end">
                 <button class="btn btn-primary btn-sm" onclick="saveConfig()" data-i18n="save">Speichern</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Motor speed limits of the profile -->
+    <div class="card bg-base-200">
+        <div class="card-body p-4">
+            <h2 class="card-title" data-i18n="limits">Motor-Grenzen des Profils</h2>
+            <p class="text-sm opacity-80" data-i18n="limitsHelp">Die Höchstdrehzahlen begrenzen die Wurfzeit am stärksten. Die AI nutzt die PID-Werte und Stopp-Schwellen nicht, nur diese Grenzen.</p>
+            <div class="grid grid-cols-2 gap-2">
+                <label class="form-control"><div class="label py-1"><span class="label-text" data-i18n="coarseMax">Grob max (U/s)</span></div>
+                    <input id="limitCoarseMax" type="number" step="0.5" min="0.1" class="input input-bordered input-sm mono" oninput="onLevelInput()"/></label>
+                <label class="form-control"><div class="label py-1"><span class="label-text" data-i18n="fineMax">Fein max (U/s)</span></div>
+                    <input id="limitFineMax" type="number" step="0.1" min="0.05" class="input input-bordered input-sm mono" oninput="onLevelInput()"/></label>
+                <label class="form-control"><div class="label py-1"><span class="label-text" data-i18n="coarseMin">Grob min (U/s)</span></div>
+                    <input id="limitCoarseMin" type="number" step="0.01" min="0" class="input input-bordered input-sm mono"/></label>
+                <label class="form-control"><div class="label py-1"><span class="label-text" data-i18n="fineMin">Fein min (U/s)</span></div>
+                    <input id="limitFineMin" type="number" step="0.01" min="0" class="input input-bordered input-sm mono"/></label>
+            </div>
+            <div id="limitsHint" class="text-xs opacity-80"></div>
+            <div class="card-actions justify-end">
+                <button class="btn btn-primary btn-sm" onclick="saveLimits()" data-i18n="save">Speichern</button>
             </div>
         </div>
     </div>
@@ -347,6 +390,14 @@ const I18N = {
     de: {
         status: "Status", profile: "Profil", weight: "Gewicht", predicted: "Vorhersage", lastThrow: "Letzter Wurf",
         mode: "Modus", precision: "Genauigkeit", speed: "Geschwindigkeit", tolerance: "Toleranz", estTime: "Geschätzte Zeit",
+        careful: "Sorgfältig", fast: "Schnell", tempo: "Tempo", autoSpeed: "Auto-Tempo (pro Profil)",
+        autoSpeedInfo: "Gelerntes Tempo {speed} für dieses Profil · Überwürfe {over} % · Nachtrickeln {topups}/Wurf · bestes Tempo {best} ({bestTime})",
+        autoSpeedFresh: "Startet bei Tempo {speed} und wird nach jeder Ladung angepasst.",
+        limits: "Motor-Grenzen des Profils",
+        limitsHelp: "Die Höchstdrehzahlen begrenzen die Wurfzeit am stärksten. Die AI nutzt die PID-Werte und Stopp-Schwellen nicht, nur diese Grenzen.",
+        coarseMax: "Grob max (U/s)", fineMax: "Fein max (U/s)", coarseMin: "Grob min (U/s)", fineMin: "Fein min (U/s)",
+        limitsFlow: "Mit dem gelernten Modell: Grob {coarse} gr/s, Fein {fine} gr/s.",
+        limitsMotor: "Achtung: der Motor selbst ist auf {max} U/s begrenzt (Motor-Einstellungen).",
         adaptive: "Adaptiver Regler", autoLearn: "Ständig weiterlernen", save: "Speichern",
         learn: "Profil einlernen",
         learnHelp: "Der Trickler wirft Probe-Pulse und mehrere Ladungen, misst dabei Fördermenge, Fallzeit, Nachlauf und Streuung und stellt sich selbst ein. Leere die Waagschale nach jedem Wurf.",
@@ -384,6 +435,14 @@ const I18N = {
     en: {
         status: "Status", profile: "Profile", weight: "Weight", predicted: "Predicted", lastThrow: "Last throw",
         mode: "Mode", precision: "Precision", speed: "Speed", tolerance: "Tolerance", estTime: "Estimated time",
+        careful: "Careful", fast: "Fast", tempo: "Speed", autoSpeed: "Auto speed (per profile)",
+        autoSpeedInfo: "Learned speed {speed} for this profile · over charges {over} % · top ups {topups}/charge · best speed {best} ({bestTime})",
+        autoSpeedFresh: "Starts at speed {speed} and adapts after every charge.",
+        limits: "Motor limits of the profile",
+        limitsHelp: "The maximum speeds limit the charge time the most. The AI ignores the PID values and stop thresholds, it only uses these limits.",
+        coarseMax: "Coarse max (rev/s)", fineMax: "Fine max (rev/s)", coarseMin: "Coarse min (rev/s)", fineMin: "Fine min (rev/s)",
+        limitsFlow: "With the learned model: coarse {coarse} gr/s, fine {fine} gr/s.",
+        limitsMotor: "Note: the motor itself is limited to {max} rev/s (motor settings).",
         adaptive: "Adaptive controller", autoLearn: "Keep learning", save: "Save",
         learn: "Learn profile",
         learnHelp: "The trickler throws probe pulses and several charges, measures flow per revolution, flight time, tail and spread, and tunes itself. Empty the pan after each throw.",
@@ -598,9 +657,12 @@ async function refreshDeviceSettings() {
     try {
         state.profile = await getJson("/rest/profile_config?pf=" + (state.config ? state.config.pf : 0));
         state.chargeConfig = await getJson("/rest/charge_mode_config");
+        state.coarseMotor = await getJson("/rest/coarse_motor_config");
+        state.fineMotor = await getJson("/rest/fine_motor_config");
     } catch (e) {
         console.warn(e);
     }
+    renderLimits();
 }
 
 async function refreshHistory() {
@@ -655,43 +717,59 @@ async function poll() {
 }
 
 // ---------------------------------------------------------------------------
-// Mode helpers (mirror trickle_mode_params_from_level / estimate_time)
+// Mode helpers (mirror trickle_mode_params / trickle_model_estimate_time)
 // ---------------------------------------------------------------------------
-function modeParams(level) {
-    const x = Math.min(Math.max(level / 100, 0), 1);
+function modeParams(speed, tolerance) {
+    const x = Math.min(Math.max(speed / 100, 0), 1);
     const g = (a, b) => a * Math.pow(b / a, x);
     const l = (a, b) => a + (b - a) * x;
     return {
-        tolerance: g(0.02, 0.10),
-        approach: g(1.6, 0.3),
-        reserve: g(2.0, 0.5),
-        sigma: l(3.0, 2.0),
+        tolerance: tolerance,
+        approach: g(1.6, 0.25),
+        reserve: g(2.0, 0.4),
+        sigma: l(4.0, 2.0),
     };
 }
 
+// Values the user is editing, falling back to the device
+function editedLimits() {
+    const p = state.profile;
+    if (!p) return null;
+    const num = (id, fallback) => {
+        const v = parseFloat(document.getElementById(id).value);
+        return v > 0 ? v : fallback;
+    };
+    return {coarseMax: num("limitCoarseMax", p.p7), fineMax: num("limitFineMax", p.p12), fineMin: p.p11};
+}
+
+function selectedTolerance() {
+    return parseFloat(document.getElementById("toleranceSelect").value) || (state.config ? state.config.a5 : 0.02);
+}
+
 // Model based estimate, calibrated with the learned mean charge time when available
-function estimateTime(level) {
-    const raw = estimateTimeRaw(level);
+function estimateTime(speed, tolerance, limits) {
+    const raw = estimateTimeRaw(speed, tolerance, limits);
     const m = state.model;
     if (raw === null || !m || !(m.mt > 0) || !state.config) return raw;
-    const current = estimateTimeRaw(state.config.a1);
+    const current = estimateTimeRaw(state.config.sp, state.config.a5, null);
     const factor = current ? Math.min(Math.max(m.mt / current, 0.5), 3) : 1;
     return raw * factor;
 }
 
-function estimateTimeRaw(level) {
+function estimateTimeRaw(speed, tolerance, limits) {
     const m = state.model;
     const p = state.profile;
     if (!m || !p || !state.config || !state.config.rd) return null;
-    const mode = modeParams(level);
+    const lim = limits || {coarseMax: p.p7, fineMax: p.p12, fineMin: p.p11};
+    const mode = modeParams(speed, tolerance);
     const target = state.config.tg || 40;
-    const coarseFlow = m.kc * p.p7 + m.kf * p.p12;
-    const fineMax = m.kf * p.p12;
-    const fineMin = m.kf * p.p11;
+    const coarseFlow = m.kc * lim.coarseMax + m.kf * lim.fineMax;
+    const fineMax = m.kf * lim.fineMax;
+    const fineMin = m.kf * lim.fineMin;
     const coarsePart = Math.max(0, target - mode.reserve);
     let time = coarseFlow > 0 ? coarsePart / coarseFlow : 0;
     // Approach time is limited by the flow fluctuation, see ctrl_min_approach_time()
-    const zcv = (mode.sigma + 1) * 1.25 * m.cv;
+    const zcv = mode.sigma * 1.25 * m.cv;
     const minApproach = m.lat / Math.log(1 + 1 / zcv);
     const approach = Math.max(mode.approach, minApproach);
     let remaining = target - coarsePart;
@@ -705,19 +783,101 @@ function estimateTimeRaw(level) {
 }
 
 function onLevelInput() {
-    const level = Number(document.getElementById("levelSlider").value);
-    document.getElementById("levelTolerance").textContent = "±" + modeParams(level).tolerance.toFixed(3) + " gr";
-    const est = estimateTime(level);
+    const speed = Number(document.getElementById("levelSlider").value);
+    const tolerance = selectedTolerance();
+    document.getElementById("speedValue").textContent = speed;
+    document.getElementById("levelTolerance").textContent = "±" + tolerance.toFixed(2) + " gr";
+    const est = estimateTime(speed, tolerance, editedLimits());
     document.getElementById("levelTime").textContent = est ? "≈ " + est.toFixed(0) + " s" : "-";
+    renderAutoSpeedInfo();
+    renderLimitsHint();
+}
+
+function renderAutoSpeedInfo() {
+    const c = state.config;
+    const el = document.getElementById("autoSpeedInfo");
+    if (!c || !document.getElementById("autoSpeedToggle").checked) {
+        el.textContent = "";
+        return;
+    }
+    const a = c.as || [0, 0, 0, c.sp, 0];
+    if (!c.a4) {
+        el.textContent = t("autoSpeedFresh", {speed: document.getElementById("levelSlider").value});
+        return;
+    }
+    el.textContent = t("autoSpeedInfo", {
+        speed: c.sp, over: fmt(a[0] * 100, 0), topups: fmt(a[1], 1), best: a[3],
+        bestTime: a[4] > 0 ? fmt(a[4], 1) + " s" : "-",
+    });
 }
 
 async function saveConfig() {
-    const level = document.getElementById("levelSlider").value;
+    const speed = document.getElementById("levelSlider").value;
     const enable = document.getElementById("enableToggle").checked;
     const auto = document.getElementById("autoLearnToggle").checked;
+    const autoSpeed = document.getElementById("autoSpeedToggle").checked;
+    const tolerance = selectedTolerance().toFixed(3);
     try {
-        await getJson(`/rest/ai_config?a0=${enable}&a1=${level}&a2=${auto}&ee=true`);
+        // In auto mode the slider restarts the tuning of this profile from the chosen speed
+        let speedParam = `a1=${speed}`;
+        if (autoSpeed && state.config && (!state.config.a4 || Number(speed) !== state.config.sp)) {
+            speedParam = `a6=${speed}`;
+        }
+        await getJson(`/rest/ai_config?a0=${enable}&a2=${auto}&a4=${autoSpeed}&a5=${tolerance}&${speedParam}&ee=true`);
         await refreshConfig();
+        toast(t("saved"));
+    } catch (e) {
+        toast(t("failed"), "error");
+    }
+}
+
+function renderLimits() {
+    const p = state.profile;
+    if (!p) return;
+    const set = (id, v) => {
+        const el = document.getElementById(id);
+        if (document.activeElement !== el) el.value = v;
+    };
+    set("limitCoarseMax", p.p7);
+    set("limitFineMax", p.p12);
+    set("limitCoarseMin", p.p6);
+    set("limitFineMin", p.p11);
+    onLevelInput();
+}
+
+function renderLimitsHint() {
+    const el = document.getElementById("limitsHint");
+    const m = state.model;
+    const lim = editedLimits();
+    if (!lim) {
+        el.textContent = "";
+        return;
+    }
+    const parts = [];
+    if (m && state.config && state.config.rd) {
+        parts.push(t("limitsFlow", {coarse: fmt(m.kc * lim.coarseMax, 1), fine: fmt(m.kf * lim.fineMax, 2)}));
+    }
+    const motorMax = Math.min(
+        state.coarseMotor && lim.coarseMax > state.coarseMotor.m4 ? state.coarseMotor.m4 : Infinity,
+        state.fineMotor && lim.fineMax > state.fineMotor.m4 ? state.fineMotor.m4 : Infinity);
+    if (motorMax !== Infinity) {
+        parts.push(t("limitsMotor", {max: motorMax}));
+    }
+    el.textContent = parts.join(" ");
+}
+
+async function saveLimits() {
+    if (!state.config) return;
+    const v = id => parseFloat(String(document.getElementById(id).value).replace(",", "."));
+    const values = {p6: v("limitCoarseMin"), p7: v("limitCoarseMax"), p11: v("limitFineMin"), p12: v("limitFineMax")};
+    if (!(values.p7 > values.p6) || !(values.p12 > values.p11) || values.p6 < 0 || values.p11 < 0) {
+        toast(t("failed"), "error");
+        return;
+    }
+    try {
+        const query = Object.entries(values).map(([k, x]) => `${k}=${x}`).join("&");
+        await getJson(`/rest/profile_config?pf=${state.config.pf}&${query}&ee=true`);
+        await refreshDeviceSettings();
         toast(t("saved"));
     } catch (e) {
         toast(t("failed"), "error");
@@ -790,7 +950,17 @@ function renderConfig() {
     if (!c) return;
     document.getElementById("profileName").textContent = c.pn;
     const slider = document.getElementById("levelSlider");
-    if (document.activeElement !== slider) slider.value = c.a1;
+    if (document.activeElement !== slider) slider.value = c.a4 ? c.sp : c.a1;
+    const toleranceSelect = document.getElementById("toleranceSelect");
+    if (document.activeElement !== toleranceSelect) {
+        // Pick the closest choice, the device may hold any value set via REST
+        let best = toleranceSelect.options[0];
+        for (const o of toleranceSelect.options) {
+            if (Math.abs(o.value - c.a5) < Math.abs(best.value - c.a5)) best = o;
+        }
+        toleranceSelect.value = best.value;
+    }
+    document.getElementById("autoSpeedToggle").checked = c.a4;
     document.getElementById("enableToggle").checked = c.a0;
     document.getElementById("autoLearnToggle").checked = c.a2;
     const learnThrows = document.getElementById("learnThrows");
@@ -1046,7 +1216,10 @@ const MODEL_STORE = "aiClaudeModel";
 // Settings Claude may propose, with the REST endpoint and sane bounds.
 // The firmware sanitizes again on its side.
 const ALLOWED_SETTINGS = {
-    precision_level:                  {api: "ai_config", key: "a1", min: 0, max: 100},
+    tolerance_gr:                     {api: "ai_config", key: "a5", min: 0.01, max: 0.5},
+    manual_speed:                     {api: "ai_config", key: "a1", min: 0, max: 100},
+    auto_speed_enable:                {api: "ai_config", key: "a4", min: 0, max: 1, bool: true},
+    auto_speed_restart_at:            {api: "ai_config", key: "a6", min: 0, max: 100},
     model_coarse_gpr:                 {api: "ai_model", key: "kc", min: 0.01, max: 50},
     model_fine_gpr:                   {api: "ai_model", key: "kf", min: 0.001, max: 5},
     model_latency_s:                  {api: "ai_model", key: "lat", min: 0.05, max: 3},
@@ -1111,15 +1284,24 @@ How the "AI Trickle" controller works:
   revolutions of the coarse/fine tube (kc/kf = grains per revolution), lat = powder flight time plus scale response,
   tail = powder that keeps dropping after the coarse tube stops (rising with time constant tau).
 - From this it predicts the powder still "in flight" and stops early. The approach slows down so that a flow surge of
-  z * flow_cv cannot overshoot (z depends on the precision level). flow_cv is the measured flow fluctuation over one
-  latency window; clumpy stick powders have a high value.
+  z * flow_cv cannot overshoot (z depends on the speed setting). flow_cv is the measured flow fluctuation over one
+  latency window; clumpy stick powders have a high value. The coarse tube stops earlier the more powder is in flight
+  and hands over to the fine tube once it would be slower than the fine tube at full speed.
 - After the main stop it waits for the scale to settle and tops up with slow fine pulses if it is short.
   It deliberately aims slightly below target in precision mode (over charges cannot be undone).
 - stop_bias is an integral correction learned from where throws land; landing_sd is the spread at that point.
-- precision_level 0 = maximum precision (tolerance 0.02 gr), 100 = maximum speed (tolerance 0.10 gr).
+- Tolerance (ai_config.a5) and speed are independent. Speed 0 = careful (slow final approach, tops up anything in the
+  lower half of the band), 100 = fast (quick approach, only tops up readings outside the tolerance).
+- Auto speed (ai_config.a4): per profile the speed rises by 10 after 12 charges without over charge, as long as the mean
+  charge time keeps improving, and drops by 25 after two over charges within about ten charges (never below 30).
+  ai_config.sp is the speed in use, ai_config.as = [over charge rate, top ups per charge, mean time s, best speed,
+  best time s]. With auto speed on, the manual speed (a1) is only the start value for new profiles.
+- Speed is mostly limited by the profile max speeds (p7 coarse, p12 fine, rev/s) times the learned grains per
+  revolution, and by the scale latency. Each top up costs roughly one latency plus a settle (1-2 s).
 - Learning sessions start with probe pulses (separate short bursts of each tube) to identify the model.
-- Profile min/max speeds (rps) bound the motors in both the adaptive and the classic PID controller.
-  Profile PID gains and classic thresholds only matter when the adaptive controller is off.
+- Profile min/max speeds (rps) bound the motors in both the adaptive and the classic PID controller; the motor
+  configuration (coarse_motor/fine_motor m4 = max rps) caps them again. Profile PID gains and classic thresholds
+  only matter when the adaptive controller is off.
 - The scale resolution is typically 0.02 gr, a single kernel of extruded powder weighs about 0.01-0.04 gr, so
   tolerances below one kernel weight are physically impossible for that powder.
 
@@ -1156,6 +1338,8 @@ function compactContext() {
         learned_model: state.model,
         profile: state.profile,
         classic_charge_mode_config: state.chargeConfig,
+        coarse_motor: state.coarseMotor,
+        fine_motor: state.fineMotor,
         status: state.status,
         scale_diagnostics: state.diag,
         series: state.series,
@@ -1230,7 +1414,7 @@ function validateProposal(input) {
 async function applyChange(change) {
     const spec = ALLOWED_SETTINGS[change.setting];
     const pf = state.config.pf;
-    const value = encodeURIComponent(change.value);
+    const value = spec.bool ? (change.value >= 0.5 ? "true" : "false") : encodeURIComponent(change.value);
     let url;
     if (spec.api === "ai_config") {
         url = `/rest/ai_config?${spec.key}=${value}&ee=true`;

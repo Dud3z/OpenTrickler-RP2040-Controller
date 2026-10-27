@@ -45,6 +45,11 @@ bool load_config(uint16_t addr, void * cfg, const void * default_cfg, size_t siz
  */
 bool save_config(uint16_t addr, void * cfg, size_t size);
 
+/**
+ * @brief CRC32 used by load_config() / save_config()
+ */
+uint32_t software_crc32(void * data, size_t length);
+
 #ifdef __cplusplus
 }
 #endif

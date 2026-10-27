@@ -1,3 +1,4 @@
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,12 +40,22 @@ eeprom_ai_trickle_data_t ai_trickle_data;
 const eeprom_ai_trickle_data_t default_ai_trickle_data = {
     .ai_trickle_data_rev = 0,
     .enable = 1,
-    .precision_level = TRICKLE_LEVEL_PRECISION,
+    .precision_level = TRICKLE_LEVEL_BALANCED,
     .auto_learn = 1,
     .learn_throws = AI_TRICKLE_DEFAULT_LEARN_THROWS,
-    .mode_preset = AI_PRESET_PRECISION,
-    // Models are initialized in ai_trickle_init()
+    .mode_preset = AI_PRESET_AUTO,
+    // Models and speeds are initialized in ai_trickle_init()
+    .tolerance_gr = TRICKLE_DEFAULT_TOLERANCE_GR,
+    .auto_speed = 1,
 };
+
+// Size of a rev 1 block: everything before the fields added in rev 2
+#define AI_TRICKLE_DATA_V1_SIZE     offsetof(eeprom_ai_trickle_data_t, tolerance_gr)
+
+static const uint8_t tolerance_choices[AI_TOLERANCE_CHOICE_COUNT] = AI_TOLERANCE_CHOICES;
+
+// Index into tolerance_choices, edited by the display menu
+uint8_t ai_tolerance_choice = 1;
 
 // Runtime state
 static trickle_trace_t trace;
@@ -89,16 +100,74 @@ bool ai_trickle_config_save(void) {
 }
 
 
+/*
+ * Read a configuration block written by save_config() with the given size.
+ * Unlike load_config() it never writes defaults back, so it can be used to
+ * probe for an older layout.
+ */
+static bool read_config_block(void * cfg, size_t size) {
+    size_t read_size = size + sizeof(uint32_t);
+    uint8_t * buf = malloc(read_size);
+    if (!buf) {
+        return false;
+    }
+
+    bool is_ok = eeprom_read(EEPROM_AI_TRICKLE_BASE_ADDR, buf, read_size);
+    if (is_ok) {
+        uint16_t rev;
+        uint32_t stored_crc32;
+        memcpy(&rev, buf, sizeof(rev));
+        memcpy(&stored_crc32, buf + size, sizeof(stored_crc32));
+        is_ok = rev == 0 && software_crc32(buf, size) == stored_crc32;
+    }
+    if (is_ok) {
+        memcpy(cfg, buf, size);
+    }
+
+    free(buf);
+    return is_ok;
+}
+
+
+static void reset_speed(uint8_t idx) {
+    trickle_speed_reset(&ai_trickle_data.speed[idx], ai_trickle_data.precision_level);
+}
+
+
 bool ai_trickle_init(void) {
     static eeprom_ai_trickle_data_t defaults;
 
     defaults = default_ai_trickle_data;
     for (int i = 0; i < MAX_PROFILE_CNT; i += 1) {
         trickle_model_reset(&defaults.models[i]);
+        trickle_speed_reset(&defaults.speed[i], defaults.precision_level);
     }
 
-    bool is_ok = load_config(EEPROM_AI_TRICKLE_BASE_ADDR, &ai_trickle_data, &defaults,
-                             sizeof(eeprom_ai_trickle_data_t), EEPROM_AI_TRICKLE_DATA_REV);
+    bool is_ok;
+    if (read_config_block(&ai_trickle_data, sizeof(eeprom_ai_trickle_data_t))) {
+        is_ok = true;
+    }
+    else if (read_config_block(&ai_trickle_data, AI_TRICKLE_DATA_V1_SIZE)) {
+        // Rev 1: keep the learned models, add the new settings. The tolerance
+        // used to follow the precision level.
+        printf("Migrating AI trickle configuration\n");
+        ai_trickle_data.tolerance_gr = trickle_default_tolerance(ai_trickle_data.precision_level);
+        ai_trickle_data.auto_speed = 0;
+        memset(ai_trickle_data.reserved2, 0x0, sizeof(ai_trickle_data.reserved2));
+        if (ai_trickle_data.mode_preset == AI_PRESET_AUTO) {
+            // Rev 1 had Custom at this position
+            ai_trickle_data.mode_preset = AI_PRESET_CUSTOM;
+        }
+        for (int i = 0; i < MAX_PROFILE_CNT; i += 1) {
+            trickle_speed_reset(&ai_trickle_data.speed[i], ai_trickle_data.precision_level);
+        }
+        is_ok = save_config(EEPROM_AI_TRICKLE_BASE_ADDR, &ai_trickle_data, sizeof(eeprom_ai_trickle_data_t));
+    }
+    else {
+        // First start (or the pre-CRC rev scheme): load_config writes the defaults
+        is_ok = load_config(EEPROM_AI_TRICKLE_BASE_ADDR, &ai_trickle_data, &defaults,
+                            sizeof(eeprom_ai_trickle_data_t), EEPROM_AI_TRICKLE_DATA_REV);
+    }
     if (!is_ok) {
         printf("Unable to read AI trickle configuration\n");
         return false;
@@ -111,6 +180,17 @@ bool ai_trickle_init(void) {
     if (ai_trickle_data.precision_level > 100) {
         ai_trickle_data.precision_level = 100;
     }
+    for (int i = 0; i < MAX_PROFILE_CNT; i += 1) {
+        trickle_speed_sanitize(&ai_trickle_data.speed[i]);
+    }
+    if (!(ai_trickle_data.tolerance_gr >= 0.01f && ai_trickle_data.tolerance_gr <= 0.5f)) {
+        ai_trickle_data.tolerance_gr = TRICKLE_DEFAULT_TOLERANCE_GR;
+    }
+    if (ai_trickle_data.mode_preset > AI_PRESET_CUSTOM) {
+        ai_trickle_data.mode_preset = AI_PRESET_CUSTOM;
+    }
+    ai_trickle_data.auto_speed = ai_trickle_data.auto_speed ? 1 : 0;
+    ai_trickle_menu_sync();
     if (ai_trickle_data.learn_throws < 2 || ai_trickle_data.learn_throws > AI_TRICKLE_MAX_LEARN_THROWS) {
         ai_trickle_data.learn_throws = AI_TRICKLE_DEFAULT_LEARN_THROWS;
     }
@@ -132,6 +212,7 @@ static trickle_model_t * model_for_profile(uint8_t idx) {
     const char * name = profile_data.profiles[idx].name;
     if (strncmp(ai_trickle_data.model_names[idx], name, PROFILE_NAME_MAX_LEN) != 0) {
         trickle_model_reset(&ai_trickle_data.models[idx]);
+        reset_speed(idx);
         strncpy(ai_trickle_data.model_names[idx], name, PROFILE_NAME_MAX_LEN);
     }
     return &ai_trickle_data.models[idx];
@@ -143,15 +224,24 @@ const trickle_model_t * ai_trickle_selected_model(void) {
 }
 
 
-static void current_mode(trickle_mode_params_t * mode) {
-    trickle_mode_params_from_level(ai_trickle_data.precision_level, mode);
+// Speed used for the profile: learned per profile in auto mode, set by hand otherwise
+static uint8_t speed_for_profile(uint8_t idx) {
+    return ai_trickle_data.auto_speed ? ai_trickle_data.speed[idx].speed : ai_trickle_data.precision_level;
+}
+
+
+static void mode_for_profile(uint8_t idx, trickle_mode_params_t * mode) {
+    trickle_mode_params(speed_for_profile(idx), ai_trickle_data.tolerance_gr, mode);
 }
 
 
 float ai_trickle_tolerance(void) {
-    trickle_mode_params_t mode;
-    current_mode(&mode);
-    return mode.tolerance_gr;
+    return ai_trickle_data.tolerance_gr;
+}
+
+
+uint8_t ai_trickle_speed(void) {
+    return speed_for_profile(selected_profile_idx());
 }
 
 
@@ -175,7 +265,7 @@ static void history_add(float target, float final, float landing, float time_s, 
     entry->landing_gr = landing;
     entry->time_s = time_s;
     entry->profile_idx = throw_profile_idx;
-    entry->level = ai_trickle_data.precision_level;
+    entry->level = speed_for_profile(throw_profile_idx);
     entry->topups = topups;
     entry->flags = flags;
 }
@@ -408,11 +498,11 @@ void ai_trickle_classic_end(float target_gr, float settled_gr, float charge_time
 // ---------------------------------------------------------------------------
 
 void ai_trickle_adaptive_begin(float target_gr, const trickle_motor_limits_t * limits, float current_weight_gr) {
-    trickle_mode_params_t mode;
-    current_mode(&mode);
-
     throw_profile_idx = selected_profile_idx();
     trickle_model_t * model = model_for_profile(throw_profile_idx);
+
+    trickle_mode_params_t mode;
+    mode_for_profile(throw_profile_idx, &mode);
 
     if (isnan(current_weight_gr) || isinf(current_weight_gr)) {
         current_weight_gr = 0.0f;
@@ -459,7 +549,7 @@ trickle_phase_t ai_trickle_adaptive_step(float t, float weight_gr, float * coars
 
 void ai_trickle_adaptive_resume(float t, float current_weight_gr) {
     trickle_mode_params_t mode;
-    current_mode(&mode);
+    mode_for_profile(throw_profile_idx, &mode);
 
     // Keep the trace, restart the controller from the current weight
     trickle_ctrl_init(&ctrl, ctrl.target_gr, &ai_trickle_data.models[throw_profile_idx], &mode, &ctrl_limits,
@@ -505,6 +595,16 @@ void ai_trickle_adaptive_end(float charge_time_s) {
     last_adaptive = true;
     history_add(result.target_gr, final, result.landing_weight_gr, charge_time_s, ctrl.topup_count, flags);
 
+    // Learning and probe throws run their own schedule, they say nothing
+    // about the speed
+    if (ai_trickle_data.auto_speed && done && !learn_active && !throw_probe) {
+        bool over_charge = last_error_gr > ai_trickle_data.tolerance_gr + 0.001f;
+        if (trickle_speed_update(&ai_trickle_data.speed[throw_profile_idx], over_charge, ctrl.topup_count,
+                                 charge_time_s)) {
+            ai_trickle_config_save();
+        }
+    }
+
     if (learn_active && done) {
         // The probe throw carries extra powder from the pulses, do not score it
         learn_session_update(last_error_gr, !throw_probe);
@@ -547,26 +647,69 @@ uint8_t ai_trickle_menu_apply_preset(void) {
     switch (ai_trickle_data.mode_preset) {
         case AI_PRESET_PRECISION:
             ai_trickle_data.precision_level = TRICKLE_LEVEL_PRECISION;
+            ai_trickle_data.auto_speed = 0;
             break;
         case AI_PRESET_BALANCED:
             ai_trickle_data.precision_level = TRICKLE_LEVEL_BALANCED;
+            ai_trickle_data.auto_speed = 0;
             break;
         case AI_PRESET_SPEED:
             ai_trickle_data.precision_level = TRICKLE_LEVEL_SPEED;
+            ai_trickle_data.auto_speed = 0;
+            break;
+        case AI_PRESET_AUTO:
+            ai_trickle_data.auto_speed = 1;
             break;
         default:
-            // Custom: keep the level set from the web page
+            // Custom: keep the speed set from the web page
+            ai_trickle_data.auto_speed = 0;
             break;
     }
 
+    if (ai_tolerance_choice < AI_TOLERANCE_CHOICE_COUNT) {
+        ai_trickle_data.tolerance_gr = tolerance_choices[ai_tolerance_choice] * 0.01f;
+    }
+
     ai_trickle_config_save();
+    ai_trickle_menu_sync();
     return 70;  // AI Trickle menu
+}
+
+
+// Show the current settings in the display menu after they changed elsewhere
+void ai_trickle_menu_sync(void) {
+    if (ai_trickle_data.auto_speed) {
+        ai_trickle_data.mode_preset = AI_PRESET_AUTO;
+    }
+    else if (ai_trickle_data.precision_level == TRICKLE_LEVEL_PRECISION) {
+        ai_trickle_data.mode_preset = AI_PRESET_PRECISION;
+    }
+    else if (ai_trickle_data.precision_level == TRICKLE_LEVEL_BALANCED) {
+        ai_trickle_data.mode_preset = AI_PRESET_BALANCED;
+    }
+    else if (ai_trickle_data.precision_level == TRICKLE_LEVEL_SPEED) {
+        ai_trickle_data.mode_preset = AI_PRESET_SPEED;
+    }
+    else {
+        ai_trickle_data.mode_preset = AI_PRESET_CUSTOM;
+    }
+
+    // Closest menu choice to the tolerance
+    float best = 1e9f;
+    for (uint8_t i = 0; i < AI_TOLERANCE_CHOICE_COUNT; i += 1) {
+        float d = fabsf(tolerance_choices[i] * 0.01f - ai_trickle_data.tolerance_gr);
+        if (d < best) {
+            best = d;
+            ai_tolerance_choice = i;
+        }
+    }
 }
 
 
 uint8_t ai_trickle_menu_reset_model(void) {
     uint8_t idx = selected_profile_idx();
     trickle_model_reset(&ai_trickle_data.models[idx]);
+    reset_speed(idx);
     strncpy(ai_trickle_data.model_names[idx], profile_data.profiles[idx].name, PROFILE_NAME_MAX_LEN);
     ai_trickle_config_save();
     return 70;
@@ -610,17 +753,23 @@ bool http_ai_trickle_page(struct fs_file *file, int num_params, char *params[], 
 bool http_rest_ai_config(struct fs_file *file, int num_params, char *params[], char *values[]) {
     // Mappings
     // a0 (bool): enable adaptive controller
-    // a1 (int): precision level, 0 = precision ... 100 = speed
+    // a1 (int): manual speed, 0 = careful ... 100 = fastest
     // a2 (bool): keep learning during normal charges
     // a3 (int): throws per learning session
+    // a4 (bool): tune the speed of each profile automatically
+    // a5 (float): tolerance in grain
+    // a6 (int): set the automatic speed of the selected profile (restarts its tuning)
     // ee (bool): save to eeprom
     // Read only
-    // tol (float): tolerance of the current level
+    // tol (float): tolerance (same as a5, kept for older pages)
+    // sp (int): speed used for the selected profile
+    // as: automatic speed state of the selected profile [over rate, top ups per charge, mean time, best speed, best time]
     // est (float): estimated charge time for the current target and profile
     // pf (int), pn (str): selected profile
     // rd (bool): model of the selected profile is ready
-    static char buf[320];
+    static char buf[448];
     bool save_to_eeprom = false;
+    uint8_t pf = selected_profile_idx();
 
     for (int idx = 0; idx < num_params; idx += 1) {
         if (strcmp(params[idx], "a0") == 0) {
@@ -629,18 +778,6 @@ bool http_rest_ai_config(struct fs_file *file, int num_params, char *params[], c
         else if (strcmp(params[idx], "a1") == 0) {
             int level = atoi(values[idx]);
             ai_trickle_data.precision_level = (uint8_t) (level < 0 ? 0 : (level > 100 ? 100 : level));
-            if (ai_trickle_data.precision_level == TRICKLE_LEVEL_PRECISION) {
-                ai_trickle_data.mode_preset = AI_PRESET_PRECISION;
-            }
-            else if (ai_trickle_data.precision_level == TRICKLE_LEVEL_BALANCED) {
-                ai_trickle_data.mode_preset = AI_PRESET_BALANCED;
-            }
-            else if (ai_trickle_data.precision_level == TRICKLE_LEVEL_SPEED) {
-                ai_trickle_data.mode_preset = AI_PRESET_SPEED;
-            }
-            else {
-                ai_trickle_data.mode_preset = AI_PRESET_CUSTOM;
-            }
         }
         else if (strcmp(params[idx], "a2") == 0) {
             ai_trickle_data.auto_learn = string_to_boolean(values[idx]) ? 1 : 0;
@@ -651,21 +788,35 @@ bool http_rest_ai_config(struct fs_file *file, int num_params, char *params[], c
                 ai_trickle_data.learn_throws = (uint8_t) throws;
             }
         }
+        else if (strcmp(params[idx], "a4") == 0) {
+            ai_trickle_data.auto_speed = string_to_boolean(values[idx]) ? 1 : 0;
+        }
+        else if (strcmp(params[idx], "a5") == 0) {
+            float tolerance = strtof(values[idx], NULL);
+            if (tolerance >= 0.01f && tolerance <= 0.5f) {
+                ai_trickle_data.tolerance_gr = tolerance;
+            }
+        }
+        else if (strcmp(params[idx], "a6") == 0) {
+            int speed = atoi(values[idx]);
+            trickle_speed_reset(&ai_trickle_data.speed[pf], (uint8_t) (speed < 0 ? 0 : (speed > 100 ? 100 : speed)));
+        }
         else if (strcmp(params[idx], "ee") == 0) {
             save_to_eeprom = string_to_boolean(values[idx]);
         }
     }
 
+    ai_trickle_menu_sync();
     if (save_to_eeprom) {
         ai_trickle_config_save();
     }
 
-    uint8_t pf = selected_profile_idx();
     const trickle_model_t * model = model_for_profile(pf);
+    const trickle_speed_state_t * speed = &ai_trickle_data.speed[pf];
     profile_t * profile = &profile_data.profiles[pf];
 
     trickle_mode_params_t mode;
-    current_mode(&mode);
+    mode_for_profile(pf, &mode);
     trickle_motor_limits_t limits = {
         .coarse_min_rps = profile->coarse_min_flow_speed_rps,
         .coarse_max_rps = profile->coarse_max_flow_speed_rps,
@@ -680,13 +831,22 @@ bool http_rest_ai_config(struct fs_file *file, int num_params, char *params[], c
 
     snprintf(buf, sizeof(buf),
              "%s"
-             "{\"a0\":%s,\"a1\":%d,\"a2\":%s,\"a3\":%d,\"tol\":%.3f,\"est\":%s,\"tg\":%.3f,\"pf\":%d,\"pn\":\"%s\",\"rd\":%s}",
+             "{\"a0\":%s,\"a1\":%d,\"a2\":%s,\"a3\":%d,\"a4\":%s,\"a5\":%.3f,\"tol\":%.3f,\"sp\":%d,"
+             "\"as\":[%.3f,%.2f,%.1f,%d,%.1f],\"est\":%s,\"tg\":%.3f,\"pf\":%d,\"pn\":\"%s\",\"rd\":%s}",
              http_json_header,
              boolean_to_string(ai_trickle_data.enable),
              ai_trickle_data.precision_level,
              boolean_to_string(ai_trickle_data.auto_learn),
              ai_trickle_data.learn_throws,
-             mode.tolerance_gr,
+             boolean_to_string(ai_trickle_data.auto_speed),
+             ai_trickle_data.tolerance_gr,
+             ai_trickle_data.tolerance_gr,
+             speed_for_profile(pf),
+             speed->over_rate,
+             speed->topup_rate,
+             speed->mean_time_s,
+             speed->best_speed,
+             speed->best_time_s,
              est_buf,
              target,
              pf,
@@ -778,6 +938,7 @@ bool http_rest_ai_model(struct fs_file *file, int num_params, char *params[], ch
         }
         else if (strcmp(params[idx], "rst") == 0 && string_to_boolean(values[idx])) {
             trickle_model_reset(model);
+            reset_speed(pf);
             modified = true;
         }
         else if (strcmp(params[idx], "ee") == 0) {

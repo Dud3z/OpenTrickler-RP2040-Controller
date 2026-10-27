@@ -62,6 +62,7 @@ const eeprom_charge_mode_data_t default_charge_mode_data = {
 // Configures
 TaskHandle_t scale_measurement_render_task_handler = NULL;
 static char title_string[30];
+static char status_string[32];  // Line below the weight: phase while charging, result afterwards
 
 static TickType_t charge_start_tick = 0;
 static float last_charge_elapsed_seconds = 0.0f;
@@ -164,8 +165,16 @@ void scale_measurement_render_task(void *p) {
         uint8_t screen_width = u8g2_GetDisplayWidth(display_handler);
         uint8_t time_width = u8g2_GetStrWidth(display_handler, time_buffer);
 
-        // Draw title on left
-        u8g2_DrawStr(display_handler, 5, 10, title_string);
+        // Draw title on left, cut short so it never runs into the timer
+        char title_buffer[sizeof(title_string)];
+        strncpy(title_buffer, title_string, sizeof(title_buffer) - 1);
+        title_buffer[sizeof(title_buffer) - 1] = '\0';
+        int title_max_width = screen_width - time_width - 5 - 5 - 4;
+        size_t title_len = strlen(title_buffer);
+        while (title_len > 0 && u8g2_GetStrWidth(display_handler, title_buffer) > title_max_width) {
+            title_buffer[--title_len] = '\0';
+        }
+        u8g2_DrawStr(display_handler, 5, 10, title_buffer);
 
         // Draw timer on right edge
         u8g2_DrawStr(display_handler, screen_width - time_width - 5, 10, time_buffer);  // 5 px padding from edge
@@ -186,9 +195,12 @@ void scale_measurement_render_task(void *p) {
         u8g2_SetFont(display_handler, u8g2_font_profont22_tf);
         u8g2_DrawStr(display_handler, 26, 35, current_weight_string);
 
+        // Draw status line (charge phase, or over / under charge of the last charge)
+        u8g2_SetFont(display_handler, u8g2_font_helvR08_tr);
+        u8g2_DrawStr(display_handler, 5, 49, status_string);
+
         // Draw profile name
         profile_t *current_profile = profile_get_selected();
-        u8g2_SetFont(display_handler, u8g2_font_helvR08_tr);
         u8g2_DrawStr(display_handler, 5, 61, current_profile->name);
 
         u8g2_SendBuffer(display_handler);
@@ -319,6 +331,9 @@ static void charge_mode_set_charging_title(trickle_phase_t phase) {
     else {
         snprintf(title_string, sizeof(title_string), "AI: %s", target_weight_string);
     }
+
+    snprintf(status_string, sizeof(status_string), "%s  Spd %u  Tol %.2f",
+             ai_trickle_phase_name(phase), ai_trickle_speed(), ai_trickle_tolerance());
 }
 
 
@@ -407,7 +422,8 @@ static void charge_mode_wait_for_complete_adaptive() {
 
             // Most likely the hopper ran empty: wait for the user
             snprintf(title_string, sizeof(title_string),
-                     phase == TRICKLE_PHASE_FAULT_NO_FLOW ? "No flow! Press=retry" : "Timeout! Press=retry");
+                     phase == TRICKLE_PHASE_FAULT_NO_FLOW ? "No flow!" : "Timeout!");
+            snprintf(status_string, sizeof(status_string), "Refill, press to retry");
             neopixel_led_set_colour(
                 neopixel_led_config.eeprom_neopixel_led_metadata.default_led_colours.mini12864_backlight_colour,
                 charge_mode_config.eeprom_charge_mode_data.neopixel_over_charge_colour,
@@ -486,6 +502,8 @@ void charge_mode_wait_for_complete() {
     if (ai_trickle_series_active()) {
         charge_mode_set_charging_title(TRICKLE_PHASE_COARSE);
     }
+    // Classic PID charge: no AI phase to show
+    status_string[0] = '\0';
 
     // Read trickling parameter from the current profile
     profile_t * current_profile = profile_get_selected();
@@ -648,9 +666,6 @@ void charge_mode_wait_for_cup_removal() {
         if (ai_trickle_learn_just_finished()) {
             snprintf(title_string, sizeof(title_string), "Learned! Remove Cup");
         }
-        else {
-            snprintf(title_string, sizeof(title_string), "Remove Cup %+.3f", -error);
-        }
     }
     else {
         ai_trickle_classic_end(charge_mode_config.target_charge_weight, current_measurement, last_charge_elapsed_seconds);
@@ -660,6 +675,15 @@ void charge_mode_wait_for_cup_removal() {
     bool series_finished = ai_trickle_series_just_finished();
     if (series_finished) {
         snprintf(title_string, sizeof(title_string), "Done! Remove Cup");
+    }
+
+    // Result on its own line, the title is too short for it next to the timer
+    const char * verdict = error <= -threshold ? "Over" : (error >= threshold ? "Under" : "OK");
+    if (charge_mode_config.eeprom_charge_mode_data.decimal_places == DP_3) {
+        snprintf(status_string, sizeof(status_string), "%s  %+.3f", verdict, -error);
+    }
+    else {
+        snprintf(status_string, sizeof(status_string), "%s  %+.2f", verdict, -error);
     }
 
     // Update LED colour before moving to the next stage

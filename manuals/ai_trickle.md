@@ -1,6 +1,6 @@
 # AI Trickle
 
-AI Trickle replaces the fixed PID tuning with a controller that learns how your powder behaves in your trickler and plans every charge from that knowledge. It learns per profile, keeps learning while you reload, and lets you choose between precision and speed. A web page shows everything live and can optionally ask Claude to analyse your throws and propose settings.
+AI Trickle replaces the fixed PID tuning with a controller that learns how your powder behaves in your trickler and plans every charge from that knowledge. It learns per profile, keeps learning while you reload, and lets you set the tolerance and the speed independently, or let it find the fastest safe speed by itself. A web page shows everything live and can optionally ask Claude to analyse your throws and propose settings.
 
 ## Why throws are sometimes over, sometimes under
 
@@ -23,12 +23,12 @@ When a tube stops, powder is still falling and the scale only reacts with a dela
 
 Main menu → **AI Trickle**
 
-* **Mode:** Precision / Balanced / Speed (or *Custom* from the web page), adaptive controller on/off, keep learning on/off.
+* **Mode:** speed Precision / Balanced / Speed / Auto (or *Custom* from the web page), tolerance (±0.01 … ±0.20 gr), adaptive controller on/off, keep learning on/off. Confirm with **OK**.
 * **Learn Profile:** choose a profile, enter the charge weight, start. The trickler throws 8 charges by default (adjustable on the web page). Empty the pan after each throw. The display shows `Learn 3/8`. It stops early as soon as the throws are within the tolerance.
 * **Model Info:** learned values and achieved accuracy.
 * **Reset Model:** forget what was learned for the current profile.
 
-During a normal charge the title shows `AI: 42.00`. After the charge, the deviation is shown (`Remove Cup +0.020`). The LEDs light green when the charge is within the tolerance of the selected mode.
+During a normal charge the title shows `AI: 42.00` and the line below the weight shows the phase, the speed and the tolerance (`Fine  Spd 70  Tol 0.02`). After the charge that line shows the result: `OK  +0.00`, `Over  +0.04` or `Under  -0.04`. The LEDs light green when the charge is within the tolerance.
 
 If a profile has not been learned yet, the first charge automatically starts with probe pulses.
 
@@ -37,7 +37,8 @@ If a profile has not been learned yet, the first charge automatically starts wit
 In the web portal, tap **AI** in the bottom bar, or open `http://<trickler-ip>/ai` directly. The page has four tabs: **Overview**, **Learn** (learning, series & ladder, model and backup), **Assistant** (Claude) and **System** (scale diagnostics, firmware update).
 
 * Live status with predicted final weight
-* Precision ↔ speed slider with tolerance and an estimated time (calibrated with your actual times)
+* Tolerance, speed slider and **Auto speed** with an estimated time (calibrated with your actual times)
+* **Motor limits of the profile:** the max/min speeds of both tubes, with the resulting powder flow and a warning when the motor configuration caps them
 * Start and track a learning session
 * Chart of the last throw: measured weight, model curve, coarse stop
 * History with error chart, statistics (mean, spread, % within tolerance, average time); stored in the browser, per profile
@@ -95,17 +96,47 @@ Charge mode must be off during an update.
 
 The Pico W (RP2040) has no A/B support. For it, the page offers the UF2 file for the USB method.
 
-## Precision levels
+## Tolerance and speed
 
-| Level | Tolerance | Behaviour |
-|---|---|---|
-| Precision (0) | ±0.02 gr | slow final approach, aims slightly low, tops up |
-| Balanced (50) | ±0.045 gr | middle ground |
-| Speed (100) | ±0.10 gr | fast approach, aims at the target |
+The **tolerance** decides when a charge is good: the scale reading must be within target ± tolerance. The **speed** (0 … 100) decides how aggressively the controller gets there. They are independent, so ±0.02 gr at full speed is a valid setting.
 
-Any value in between can be set on the web page.
+| Speed | Behaviour |
+|---|---|
+| Precision (0) | slow final approach, aims slightly low, tops up anything in the lower half of the band |
+| Balanced (50) | middle ground |
+| Speed (100) | fast approach, hands over from coarse to fine as early as that is faster, only tops up readings outside the tolerance |
 
-Note: a single kernel of extruded powder weighs about 0.01-0.04 gr. Tolerances below one kernel weight are physically impossible for that powder.
+**Auto speed** (default) tunes the speed per profile while you reload: after 12 charges without an over charge it goes up by 10, as long as the charges actually get faster. Two over charges within about ten charges cost 25 (never below 30). If a higher speed made the charges slower (more top ups), it goes back to the fastest speed seen. The web page shows the learned speed, the over charge rate and the top ups per charge.
+
+Note: a single kernel of extruded powder weighs about 0.01-0.04 gr. Tolerances below one kernel weight are physically impossible for that powder, and with a 0.02 gr tolerance one stray kernel decides.
+
+### Does the AI change the Charge Mode settings?
+
+No. The adaptive controller does not use the PID gains (Kp/Ki/Kd) or the coarse/fine stop thresholds at all; it plans every charge from the learned model. It does use from the profile and charge mode settings: the **min/max speeds** of both tubes, the coarse backoff, the servo gate, precharge, the LED colours, the decimal places and the zero check.
+
+### Getting fast
+
+The charge time is mostly decided by three things:
+
+1. **Max speeds of the profile** (coarse and fine). With the default "AR2209" limits of 8 / 2 rev/s a ball powder flows about 13 gr/s from the coarse tube and 0.5 gr/s from the fine tube. Raising them to 15 / 5 rev/s cuts several seconds. The motor configuration has its own max speed; the lower one wins.
+2. **The scale.** Set the A&D FX to stream at the fastest rate with the fast response setting. Every top up costs about one scale delay plus a settle (1-2 s); scale diagnostics on the *System* tab shows the rate and noise.
+3. **The powder.** Ball and fine extruded powders can be thrown fast and tight. With coarse stick powders the odd over charge comes from single kernels and clumps, at any speed.
+
+Simulated, 44 gr, ±0.02 gr tolerance, after a learning session (100 charges each, "scale" = reading within ±0.02 gr, "true" = actual powder within ±0.02 gr):
+
+| Powder | Limits coarse / fine | Speed | Ø time | Scale in tol. | True in tol. | Over |
+|---|---|---|---|---|---|---|
+| Ball | 8 / 2 rev/s | 0 | 19.6 s | 99 % | 99 % | 1 % |
+| Ball | 8 / 2 rev/s | 100 | 11.0 s | 100 % | 62 % | 3 % |
+| Ball | 8 / 2 rev/s | Auto (→100) | 10.6 s | 100 % | 72 % | 2 % |
+| Ball | 15 / 5 rev/s | 0 | 16.9 s | 100 % | 99 % | 1 % |
+| Ball | 15 / 5 rev/s | 50 | 12.5 s | 98 % | 97 % | 3 % |
+| Ball | 15 / 5 rev/s | 100 | **9.7 s** | 100 % | 72 % | 0 % |
+| Short extruded | 15 / 5 rev/s | 100 | 13.9 s | 88 % | 75 % | 9 % |
+
+At high speed the controller accepts a reading of exactly target − 0.02 gr, so the true weight is often 0.02-0.03 gr low while the scale shows a hit. If you need the true weight inside ±0.02 gr, use speed 50 or a tolerance of ±0.01 gr.
+
+Reproduce with `make -C tests/sim && tests/sim/trickle_bench study`.
 
 ## Simulation results
 
@@ -114,14 +145,14 @@ The controller was tested on the host with a physical simulator (`tests/sim`): k
 | Powder | Controller | within ±0.02 gr | within ±0.04 gr | Ø time |
 |---|---|---|---|---|
 | Ball | Classic PID | 61 % | 99 % | 44 s |
-| Ball | AI precision | **100 %** | 100 % | **18 s** |
-| Ball | AI speed | 82 % | 97 % | **9 s** |
+| Ball | AI precision | **99 %** | 100 % | **20 s** |
+| Ball | AI speed 100, ±0.10 | 47 % | 85 % | **9 s** |
 | Short extruded | Classic PID | 64 % | 99 % | 56 s |
-| Short extruded | AI precision | **89 %** | 94 % | **24 s** |
+| Short extruded | AI precision | **85 %** | 92 % | **29 s** |
 | Flake | Classic PID | 49 % | 97 % | 54 s |
-| Flake | AI precision | **100 %** | 100 % | **22 s** |
+| Flake | AI precision | **94 %** | 99 % | **25 s** |
 | Long stick (clumpy) | Classic PID | 29 % | 82 % | 64 s |
-| Long stick (clumpy) | AI precision | **44 %** | 71 % | **34 s** |
+| Long stick (clumpy) | AI precision | **46 %** | 80 % | **40 s** |
 
 With long, clumpy stick powders a single clump (≈0.25 gr) decides the outcome. The AI is still about twice as fast there, but not more accurate in every respect. These are simulation values: real powders and tricklers differ, which is exactly why the system learns on your machine.
 

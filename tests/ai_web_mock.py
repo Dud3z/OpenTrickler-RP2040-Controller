@@ -34,7 +34,8 @@ def load_export():
 EXPORT = load_export()
 
 STATE = {
-    'config': {'a0': True, 'a1': 0, 'a2': True, 'a3': 8, 'tol': 0.02, 'est': 24.0, 'tg': 42.0,
+    'config': {'a0': True, 'a1': 50, 'a2': True, 'a3': 8, 'a4': True, 'a5': 0.02, 'tol': 0.02, 'sp': 70,
+               'as': [0.04, 0.6, 9.8, 70, 9.6], 'est': 24.0, 'tg': 42.0,
                'pf': 0, 'pn': EXPORT['model']['pn'], 'rd': True},
     'model': EXPORT['model'],
     'history': EXPORT['history'],
@@ -93,7 +94,15 @@ class Handler(BaseHTTPRequestHandler):
                 c['a0'] = as_bool(q['a0'])
             if 'a1' in q:
                 c['a1'] = int(q['a1'])
-                c['tol'] = 0.02 * (5 ** (c['a1'] / 100))
+            if 'a4' in q:
+                c['a4'] = as_bool(q['a4'])
+            if 'a5' in q:
+                c['a5'] = c['tol'] = float(q['a5'])
+            if 'a6' in q:
+                c['sp'] = int(q['a6'])
+                c['as'] = [0.0, 0.0, 0.0, c['sp'], 0.0]
+            if not c['a4']:
+                c['sp'] = c['a1']
             if 'a2' in q:
                 c['a2'] = as_bool(q['a2'])
             if 'a3' in q:
@@ -141,6 +150,10 @@ class Handler(BaseHTTPRequestHandler):
                 if key in q and key != 'pf':
                     PROFILE[key] = float(q[key])
             self.send_json(PROFILE)
+        elif url.path in ('/rest/coarse_motor_config', '/rest/fine_motor_config'):
+            self.send_json({'m0': 5000.0, 'm1': 200, 'm2': 500, 'm3': 256,
+                            'm4': 20 if 'coarse' in url.path else 6, 'm5': 110, 'm6': 0.02, 'm7': 1.0,
+                            'm8': False, 'm9': False})
         elif url.path == '/rest/charge_mode_config':
             for key in CHARGE_MODE:
                 if key in q:

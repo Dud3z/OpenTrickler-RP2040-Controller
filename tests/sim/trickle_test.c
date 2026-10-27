@@ -87,6 +87,61 @@ static void test_mode_params(void) {
     CHECK(precise.approach_time_s > fast.approach_time_s, "approach time not monotonic");
     CHECK(precise.fine_reserve_gr > fast.fine_reserve_gr, "fine reserve not monotonic");
     CHECK(fast.aim_below_gr == 0.0f, "speed mode should aim at the target");
+
+    // Speed and tolerance are independent
+    trickle_mode_params_t fast_tight;
+    trickle_mode_params(100, 0.02f, &fast_tight);
+    CHECK(fabsf(fast_tight.tolerance_gr - 0.02f) < 1e-4f, "tolerance not kept at speed 100: %f", fast_tight.tolerance_gr);
+    CHECK(fast_tight.approach_time_s == fast.approach_time_s, "speed params depend on the tolerance");
+    CHECK(fast_tight.topup_threshold_gr > 0.02f && fast_tight.topup_threshold_gr < 0.025f,
+          "fast mode should only top up outside the band: %f", fast_tight.topup_threshold_gr);
+    CHECK(precise.topup_threshold_gr < 0.015f, "precision mode tops up in the lower half: %f", precise.topup_threshold_gr);
+}
+
+
+static void test_auto_speed(void) {
+    trickle_speed_state_t state;
+    trickle_speed_reset(&state, 50);
+
+    // Clean charges with improving time: speeds up
+    for (int i = 0; i < TRICKLE_SPEED_CLEAN_STREAK; i += 1) {
+        trickle_speed_update(&state, false, 0, 10.0f);
+    }
+    CHECK(state.speed == 50 + TRICKLE_SPEED_STEP_UP, "no speed up after a clean streak: %u", state.speed);
+
+    // A single over charge only restarts the streak
+    trickle_speed_update(&state, true, 0, 9.0f);
+    CHECK(state.speed == 50 + TRICKLE_SPEED_STEP_UP, "single over charge slowed down: %u", state.speed);
+    CHECK(state.clean_streak == 0, "streak not restarted");
+
+    // A second one soon after steps down
+    trickle_speed_update(&state, false, 0, 9.0f);
+    trickle_speed_update(&state, true, 0, 9.0f);
+    CHECK(state.speed == 50 + TRICKLE_SPEED_STEP_UP - TRICKLE_SPEED_STEP_DOWN, "no step down: %u", state.speed);
+
+    // Never below the floor
+    for (int i = 0; i < 20; i += 1) {
+        trickle_speed_update(&state, true, 0, 9.0f);
+    }
+    CHECK(state.speed == TRICKLE_SPEED_AUTO_MIN, "below the floor: %u", state.speed);
+
+    // Going faster made it slower: back to the best speed
+    trickle_speed_reset(&state, 60);
+    for (int i = 0; i < TRICKLE_SPEED_CLEAN_STREAK; i += 1) {
+        trickle_speed_update(&state, false, 0, 10.0f);
+    }
+    CHECK(state.speed == 70, "speed %u", state.speed);
+    for (int i = 0; i < TRICKLE_SPEED_CLEAN_STREAK; i += 1) {
+        trickle_speed_update(&state, false, 3, 14.0f);
+    }
+    CHECK(state.speed == 60, "did not return to the best speed: %u", state.speed);
+
+    // Never above 100
+    trickle_speed_reset(&state, 100);
+    for (int i = 0; i < 3 * TRICKLE_SPEED_CLEAN_STREAK; i += 1) {
+        trickle_speed_update(&state, false, 0, 5.0f);
+    }
+    CHECK(state.speed == 100, "above 100: %u", state.speed);
 }
 
 
@@ -354,6 +409,7 @@ static void test_sha256(void) {
 
 int main(void) {
     test_mode_params();
+    test_auto_speed();
     test_fit_recovers_parameters();
     test_trace_decimation();
     test_controller_hits_target_with_exact_model();

@@ -25,6 +25,7 @@ extern servo_gate_t servo_gate;
 extern scale_config_t scale_config;
 extern eeprom_profile_data_t profile_data;
 extern eeprom_ai_trickle_data_t ai_trickle_data;
+extern uint8_t ai_tolerance_choice;
 
 
 const char * get_selected_profile_name(void * data, uint16_t idx) {
@@ -332,6 +333,7 @@ muif_t muif_list[] = {
 
         // AI Trickle settings
         MUIF_VARIABLE("AM", &ai_trickle_data.mode_preset, mui_u8g2_u8_opt_line_wa_mud_pi),
+        MUIF_VARIABLE("AT", &ai_tolerance_choice, mui_u8g2_u8_opt_line_wa_mud_pi),
         MUIF_VARIABLE("AE", &ai_trickle_data.enable, mui_u8g2_u8_opt_line_wa_mud_pi),
         MUIF_VARIABLE("AL", &ai_trickle_data.auto_learn, mui_u8g2_u8_opt_line_wa_mud_pi),
         MUIF_RO("AI", render_ai_model_details),
@@ -486,14 +488,16 @@ fds_t fds_data[] = {
     MUI_XY("HL", 0,13)
 
     MUI_STYLE(0)
-    MUI_LABEL(5,24, "Mode:")
-    MUI_XYAT("AM", 62, 24, 60, "Precision|Balanced|Speed|Custom")
-    MUI_LABEL(5,35, "Adaptive:")
-    MUI_XYAT("AE", 62, 35, 60, "Off|On")
-    MUI_LABEL(5,46, "Auto learn:")
-    MUI_XYAT("AL", 62, 46, 60, "Off|On")
+    MUI_LABEL(5,22, "Speed:")
+    MUI_XYAT("AM", 62, 22, 60, "Precision|Balanced|Speed|Auto|Custom")
+    MUI_LABEL(5,31, "Tolerance:")
+    MUI_XYAT("AT", 62, 31, 60, "0.01|0.02|0.03|0.04|0.05|0.06|0.08|0.10|0.15|0.20")
+    MUI_LABEL(5,40, "Adaptive:")
+    MUI_XYAT("AE", 62, 40, 60, "Off|On")
+    MUI_LABEL(5,49, "Auto learn:")
+    MUI_XYAT("AL", 62, 49, 60, "Off|On")
 
-    MUI_XYAT("LV", 64, 59, 12, " OK ")  // APP_STATE_ENTER_AI_APPLY_PRESET
+    MUI_XYAT("LV", 64, 60, 12, " OK ")  // APP_STATE_ENTER_AI_APPLY_PRESET
 
     // Menu 72: Learn profile, select the profile
     MUI_FORM(72)

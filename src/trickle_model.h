@@ -40,6 +40,12 @@ extern "C" {
 #define TRICKLE_LEVEL_BALANCED          50
 #define TRICKLE_LEVEL_SPEED             100
 
+#define TRICKLE_DEFAULT_TOLERANCE_GR    0.02f
+#define TRICKLE_SPEED_STEP_UP           10      // Speed increase after a clean streak
+#define TRICKLE_SPEED_STEP_DOWN         25      // Speed decrease after an over charge
+#define TRICKLE_SPEED_CLEAN_STREAK      12      // Clean charges needed before speeding up
+#define TRICKLE_SPEED_AUTO_MIN          30      // Automatic tuning does not go slower than this
+
 // Model flags
 #define TRICKLE_MODEL_FLAG_VALID        (1 << 0)    // Model has been fitted at least once
 #define TRICKLE_MODEL_FLAG_CONVERGED    (1 << 1)    // Learning session reached the accuracy goal
@@ -70,10 +76,31 @@ typedef struct {
     float fine_reserve_gr;      // Powder left for the fine trickler after the coarse stop (grain)
     float coarse_margin_sigma;  // Safety margin on the coarse stop in standard deviations
     float aim_below_gr;         // Aim this much below target, top up covers the rest (grain)
-    float aim_sigma;            // Additionally aim below by this many landing standard deviations
+    float fine_surge_sigma;     // Flow surge the fine approach must survive without overshooting (sigma)
+    float end_allowance_gr;     // Share of the tolerance a surge at the end of the approach may use (grain)
+    float overshoot_sigma;      // Aim low enough that landing above target + tolerance is this unlikely (sigma)
     float topup_threshold_gr;   // Top up when the settled weight is this much below target (grain)
+    float topup_pulse_s;        // Longest top up pulse, shorter is faster but less gentle (s)
     float settle_timeout_s;     // Maximum wait for the scale to settle (s)
+    uint8_t settle_samples;     // Stable readings needed before judging the weight
 } trickle_mode_params_t;
+
+
+/*
+ * Speed of one profile and the state of its automatic tuning. The speed goes
+ * up step by step while charges stay clean and drops quickly after an over
+ * charge, so it settles just below where over charges start to happen.
+ */
+typedef struct {
+    uint8_t speed;              // 0 = careful ... 100 = fastest
+    uint8_t clean_streak;       // Adaptive charges without over charge since the last change
+    uint8_t best_speed;         // Speed with the shortest mean charge time seen so far
+    uint8_t reserved;
+    float over_rate;            // Exponentially weighted share of over charges
+    float topup_rate;           // Exponentially weighted top ups per charge
+    float mean_time_s;          // Exponentially weighted charge time at the current speed (s)
+    float best_time_s;          // Mean charge time at best_speed (s), 0 if unknown
+} trickle_speed_state_t;
 
 
 typedef struct {
@@ -142,7 +169,7 @@ typedef struct {
     float predicted_gr;         // Predicted final weight if the motors stopped now
 
     // Settle detection
-    float settle_window[5];
+    float settle_window[8];
     uint8_t settle_count;
 
     // Top up
@@ -213,7 +240,14 @@ typedef struct {
 
 
 // Mode
+void trickle_mode_params(uint8_t speed, float tolerance_gr, trickle_mode_params_t * params);
+float trickle_default_tolerance(uint8_t speed);
 void trickle_mode_params_from_level(uint8_t level, trickle_mode_params_t * params);
+
+// Automatic speed
+void trickle_speed_reset(trickle_speed_state_t * state, uint8_t speed);
+void trickle_speed_sanitize(trickle_speed_state_t * state);
+bool trickle_speed_update(trickle_speed_state_t * state, bool over_charge, uint8_t topups, float charge_time_s);
 
 // Model
 void trickle_model_reset(trickle_model_t * model);

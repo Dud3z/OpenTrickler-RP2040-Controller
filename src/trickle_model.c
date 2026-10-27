@@ -20,11 +20,11 @@
 // Controller constants
 #define COARSE_APPROACH_TIME_S      0.6f        // Time constant when the coarse trickler slows down
 #define FINE_PRIME_S                1.5f        // Start the fine trickler this long before the coarse stop
+#define COARSE_HANDOVER_RATIO       1.0f        // Stop the coarse trickler when it is this close to the fine flow
 #define SETTLE_MIN_EXTRA_S          0.25f       // Wait at least latency + this before judging the scale
 #define SETTLE_STABLE_RANGE_GR      0.03f       // Max-min of the settle window to be considered stable
-#define SETTLE_WINDOW_LEN           4
+#define SETTLE_WINDOW_MAX           8
 #define TOPUP_DELIVERY_RATIO        0.7f        // Ask the top up pulse for 70% of the missing powder
-#define TOPUP_MAX_PULSE_S           3.0f        // Top up pulses run as slow as possible within this time
 #define FLOW_CHECK_WINDOW_S         4.0f
 #define FLOW_CHECK_MIN_EXPECTED_GR  0.6f
 #define CHARGE_TIMEOUT_S            240.0f
@@ -81,20 +81,144 @@ static float tail_fraction(float dt, float tau) {
 }
 
 
-void trickle_mode_params_from_level(uint8_t level, trickle_mode_params_t * params) {
-    // Level 0 favours precision, level 100 favours speed
-    float x = clampf((float) level / 100.0f, 0.0f, 1.0f);
+/*
+ * Speed and tolerance are independent: the tolerance decides when a charge is
+ * good enough, the speed how aggressive the controller is on the way there.
+ * A tight tolerance at high speed works by landing fast and slightly low, then
+ * topping up; the learned spread decides how low.
+ */
+void trickle_mode_params(uint8_t speed, float tolerance_gr, trickle_mode_params_t * params) {
+    float x = clampf((float) speed / 100.0f, 0.0f, 1.0f);
 
-    params->tolerance_gr = gerpf(0.02f, 0.10f, x);
-    params->approach_time_s = gerpf(1.6f, 0.3f, x);
-    params->fine_reserve_gr = gerpf(2.0f, 0.5f, x);
+    params->tolerance_gr = clampf(tolerance_gr, 0.01f, 0.5f);
+    params->approach_time_s = gerpf(1.6f, 0.25f, x);
+    params->fine_reserve_gr = gerpf(2.0f, 0.4f, x);
     params->coarse_margin_sigma = lerpf(3.0f, 2.0f, x);
     params->aim_below_gr = params->tolerance_gr * 0.5f * (1.0f - x);
-    params->aim_sigma = lerpf(1.0f, 0.0f, x);
-    // The scale reading is quantized, so precision levels top up before the
-    // reading leaves the tolerance band
-    params->topup_threshold_gr = params->tolerance_gr * lerpf(0.5f, 1.0f, x);
+    params->overshoot_sigma = 2.0f;
+    params->fine_surge_sigma = lerpf(4.0f, 2.0f, x);
+    params->end_allowance_gr = params->tolerance_gr * 0.5f * x;
+    // Precision tops up anything in the lower half of the band, speed only
+    // what is actually outside the tolerance. The small slack keeps a reading
+    // exactly at target - tolerance inside.
+    params->topup_threshold_gr = params->tolerance_gr * lerpf(0.5f, 1.0f, x) + 0.002f;
+    params->topup_pulse_s = gerpf(3.0f, 0.4f, x);
     params->settle_timeout_s = lerpf(4.0f, 2.0f, x);
+    params->settle_samples = x > 0.5f ? 3 : 4;
+}
+
+
+float trickle_default_tolerance(uint8_t speed) {
+    return gerpf(0.02f, 0.10f, clampf((float) speed / 100.0f, 0.0f, 1.0f));
+}
+
+
+void trickle_speed_reset(trickle_speed_state_t * state, uint8_t speed) {
+    memset(state, 0x0, sizeof(trickle_speed_state_t));
+    state->speed = speed > 100 ? 100 : speed;
+    state->best_speed = state->speed;
+}
+
+
+void trickle_speed_sanitize(trickle_speed_state_t * state) {
+    if (state->speed > 100) {
+        state->speed = 100;
+    }
+    if (state->best_speed > 100) {
+        state->best_speed = state->speed;
+    }
+    if (!(state->over_rate >= 0.0f && state->over_rate <= 1.0f)) {
+        state->over_rate = 0.0f;
+    }
+    if (!(state->topup_rate >= 0.0f && state->topup_rate <= 10.0f)) {
+        state->topup_rate = 0.0f;
+    }
+    if (!(state->mean_time_s >= 0.0f && state->mean_time_s <= 600.0f)) {
+        state->mean_time_s = 0.0f;
+    }
+    if (!(state->best_time_s >= 0.0f && state->best_time_s <= 600.0f)) {
+        state->best_time_s = 0.0f;
+    }
+}
+
+
+/*
+ * Called after every adaptive charge. Returns true when the speed changed.
+ *
+ * An over charge cannot be fixed (the user has to dump the powder), so a
+ * second one within roughly ten charges costs a big step down. A single one
+ * only restarts the clean streak: coarse powders throw the odd over charge at
+ * any speed, slowing down for those would only cost time. A run of clean
+ * charges earns a small step up, but only while going faster actually paid
+ * off: when a higher speed made the charges slower (more top ups), go back to
+ * the best speed seen.
+ */
+bool trickle_speed_update(trickle_speed_state_t * state, bool over_charge, uint8_t topups, float charge_time_s) {
+    const float gain = 0.15f;
+    const float over_gain = 0.08f;
+    const float over_limit = 0.1f;
+    uint8_t old_speed = state->speed;
+
+    state->over_rate = lerpf(state->over_rate, over_charge ? 1.0f : 0.0f, over_gain);
+    state->topup_rate = lerpf(state->topup_rate, (float) topups, gain);
+    if (charge_time_s > 0.0f) {
+        state->mean_time_s = state->mean_time_s > 0.0f ? lerpf(state->mean_time_s, charge_time_s, gain)
+                                                       : charge_time_s;
+    }
+
+    if (over_charge) {
+        state->clean_streak = 0;
+        if (state->over_rate > over_limit) {
+            // Below the floor the slower approach no longer reduces over
+            // charges (those come from single kernels and clumps), it only
+            // costs time.
+            uint8_t floor = state->speed < TRICKLE_SPEED_AUTO_MIN ? state->speed : TRICKLE_SPEED_AUTO_MIN;
+            state->speed = state->speed > floor + TRICKLE_SPEED_STEP_DOWN ? state->speed - TRICKLE_SPEED_STEP_DOWN : floor;
+            // Give the slower speed a fresh start instead of stepping down
+            // again on the next over charge
+            state->over_rate = 0.5f * over_limit;
+            if (state->best_speed > state->speed) {
+                state->best_speed = state->speed;
+                state->best_time_s = 0.0f;
+            }
+        }
+    }
+    else {
+        if (state->clean_streak < 255) {
+            state->clean_streak += 1;
+        }
+
+        if (state->clean_streak >= TRICKLE_SPEED_CLEAN_STREAK) {
+            // The streak also gave the time average enough charges to settle
+            if (state->best_time_s <= 0.0f || state->mean_time_s < state->best_time_s) {
+                state->best_time_s = state->mean_time_s;
+                state->best_speed = state->speed;
+            }
+
+            if (state->speed < 100 && state->mean_time_s <= state->best_time_s * 1.05f) {
+                uint16_t next = state->speed + TRICKLE_SPEED_STEP_UP;
+                state->speed = next > 100 ? 100 : (uint8_t) next;
+            }
+            else if (state->speed > state->best_speed) {
+                // Faster settings made the charges slower, go back
+                state->speed = state->best_speed;
+            }
+            state->clean_streak = 0;
+        }
+    }
+
+    if (state->speed != old_speed) {
+        // The time average belongs to the old speed
+        state->mean_time_s = 0.0f;
+        return true;
+    }
+    return false;
+}
+
+
+// One knob version: level 0 is slow and tight, level 100 fast and wide
+void trickle_mode_params_from_level(uint8_t level, trickle_mode_params_t * params) {
+    trickle_mode_params(level, trickle_default_tolerance(level), params);
 }
 
 
@@ -150,11 +274,11 @@ float trickle_model_effective_aim_below(const trickle_model_t * model,
                                         const trickle_mode_params_t * mode) {
     float aim = mode->aim_below_gr;
 
-    // Once the landing spread is known, aim below by a few sigma so that an
-    // over charge (which cannot be corrected) becomes unlikely. The top up
-    // phase fills the remaining gap.
+    // Once the landing spread is known, aim low enough that landing above
+    // target + tolerance (an over charge that cannot be corrected) becomes
+    // unlikely. The top up phase fills the remaining gap.
     if (model->learned_throws >= 3) {
-        float sigma_aim = mode->aim_sigma * model->landing_sd_gr;
+        float sigma_aim = mode->overshoot_sigma * model->landing_sd_gr - mode->tolerance_gr;
         if (sigma_aim > aim) {
             aim = sigma_aim;
         }
@@ -181,11 +305,21 @@ float trickle_model_estimate_time(const trickle_model_t * model,
         t += coarse_part / coarse_flow;
     }
 
+    // Same lower bound on the approach time as the controller
+    float approach_time = mode->approach_time_s;
+    float zcv = mode->fine_surge_sigma * FLOW_CV_SAFETY * model->flow_cv;
+    if (zcv > 0.0f) {
+        float min_approach_time = model->latency_s / logf(1.0f + 1.0f / zcv);
+        if (approach_time < min_approach_time) {
+            approach_time = min_approach_time;
+        }
+    }
+
     // Numerically walk the fine approach: flow = remaining / T, clamped
     float remaining = fine_part;
     float dt = 0.05f;
     for (int i = 0; i < 4000 && remaining > 0.0f; i += 1) {
-        float q = clampf(remaining / mode->approach_time_s, fine_min_flow, fine_max_flow);
+        float q = clampf((remaining + mode->end_allowance_gr) / approach_time, fine_min_flow, fine_max_flow);
         if (remaining <= q * model->latency_s) {
             break;
         }
@@ -400,10 +534,9 @@ static float ctrl_aim_weight(const trickle_ctrl_t * ctrl) {
  * surge of the in-flight powder still stays below the remaining distance
  * gives T >= latency / ln(1 + 1 / (z * cv)).
  */
-static float ctrl_min_approach_time(const trickle_ctrl_t * ctrl) {
-    // Flow surges come with heavy tails (clumps), so be generous on both the
-    // number of sigmas and the fluctuation itself.
-    float z = ctrl->mode.coarse_margin_sigma + 1.0f;
+static float ctrl_min_approach_time(const trickle_ctrl_t * ctrl, float z) {
+    // Flow surges come with heavy tails (clumps), so be generous on the
+    // fluctuation itself.
     float zcv = z * FLOW_CV_SAFETY * ctrl->model.flow_cv;
     return ctrl->model.latency_s / logf(1.0f + 1.0f / zcv);
 }
@@ -460,7 +593,11 @@ static void ctrl_step_main(trickle_ctrl_t * ctrl, float t_now, float weight_gr) 
     }
 
     if (ctrl->phase == TRICKLE_PHASE_COARSE) {
-        float predicted_with_tail = predicted + positive(ctrl->model.coarse_tail_gr);
+        // At high coarse speeds a lot of powder is in the air; a flow surge
+        // there is what the fine reserve has to absorb, so the coarse
+        // trickler stops earlier the more powder is in flight.
+        float inflight_uncertainty = ctrl->mode.coarse_margin_sigma * FLOW_CV_SAFETY * ctrl->model.flow_cv * inflight;
+        float predicted_with_tail = predicted + positive(ctrl->model.coarse_tail_gr) + inflight_uncertainty;
 
         if (predicted_with_tail >= ctrl->coarse_goal_gr) {
             bool coarse_was_running = ctrl->coarse_rps > 0.0f;
@@ -474,11 +611,24 @@ static void ctrl_step_main(trickle_ctrl_t * ctrl, float t_now, float weight_gr) 
         }
         else {
             float remaining = ctrl->coarse_goal_gr - predicted_with_tail;
-            float approach_time = ctrl_min_approach_time(ctrl);
+            float approach_time = ctrl_min_approach_time(ctrl, ctrl->mode.coarse_margin_sigma + 1.0f);
             if (approach_time < COARSE_APPROACH_TIME_S) {
                 approach_time = COARSE_APPROACH_TIME_S;
             }
             float rps = remaining / approach_time / ctrl->model.coarse_gpr;
+
+            // Once the slowed down coarse trickler delivers less than the fine
+            // trickler at full speed, the fine trickler is the faster way to
+            // finish: hand over instead of crawling with the coarse one.
+            float handover_flow = COARSE_HANDOVER_RATIO * ctrl->model.fine_gpr * ctrl->limits.fine_max_rps;
+            if (rps * ctrl->model.coarse_gpr < handover_flow && ctrl->t_coarse_stop < 0.0f) {
+                ctrl->coarse_rps = 0.0f;
+                ctrl->t_coarse_stop = t_now;
+                ctrl_mark_coarse_stop(ctrl, t_now);
+                ctrl->phase = TRICKLE_PHASE_FINE;
+                ctrl->t_phase = t_now;
+                return;
+            }
             ctrl->coarse_rps = clampf(rps, ctrl->limits.coarse_min_rps, ctrl->limits.coarse_max_rps);
 
             // The fine trickler only joins shortly before the coarse stop so
@@ -501,11 +651,17 @@ static void ctrl_step_main(trickle_ctrl_t * ctrl, float t_now, float weight_gr) 
     }
 
     float approach_time = ctrl->mode.approach_time_s;
-    float min_approach_time = ctrl_min_approach_time(ctrl);
+    float min_approach_time = ctrl_min_approach_time(ctrl, ctrl->mode.fine_surge_sigma);
     if (approach_time < min_approach_time) {
         approach_time = min_approach_time;
     }
-    float flow = remaining / approach_time;
+
+    // A surge near the end only has to stay inside the tolerance, so the
+    // approach does not need to crawl the last few hundredths. Deliberately
+    // independent of the aim: a wider landing spread must not speed up the
+    // end of the approach, that would widen the spread further.
+    float allowance = ctrl->mode.end_allowance_gr;
+    float flow = (remaining + allowance) / approach_time;
     float rps = flow / ctrl->model.fine_gpr;
     ctrl->fine_rps = clampf(rps, ctrl->limits.fine_min_rps, ctrl->limits.fine_max_rps);
 }
@@ -579,26 +735,31 @@ static void ctrl_step_settle(trickle_ctrl_t * ctrl, float t_now, float weight_gr
         return;
     }
 
+    uint8_t window = ctrl->mode.settle_samples;
+    if (window < 2 || window > SETTLE_WINDOW_MAX) {
+        window = 4;
+    }
+
     // Shift the settle window
-    if (ctrl->settle_count < SETTLE_WINDOW_LEN) {
+    if (ctrl->settle_count < window) {
         ctrl->settle_window[ctrl->settle_count] = weight_gr;
         ctrl->settle_count += 1;
     }
     else {
-        for (int i = 1; i < SETTLE_WINDOW_LEN; i += 1) {
+        for (int i = 1; i < window; i += 1) {
             ctrl->settle_window[i - 1] = ctrl->settle_window[i];
         }
-        ctrl->settle_window[SETTLE_WINDOW_LEN - 1] = weight_gr;
+        ctrl->settle_window[window - 1] = weight_gr;
     }
 
-    if (ctrl->settle_count < SETTLE_WINDOW_LEN) {
+    if (ctrl->settle_count < window) {
         return;
     }
 
     float w_min = ctrl->settle_window[0];
     float w_max = ctrl->settle_window[0];
     float w_sum = 0.0f;
-    for (int i = 0; i < SETTLE_WINDOW_LEN; i += 1) {
+    for (int i = 0; i < window; i += 1) {
         float w = ctrl->settle_window[i];
         w_min = w < w_min ? w : w_min;
         w_max = w > w_max ? w : w_max;
@@ -613,7 +774,7 @@ static void ctrl_step_settle(trickle_ctrl_t * ctrl, float t_now, float weight_gr
 
     // Use the latest reading when stable (the scale's own filter already
     // averages), the mean otherwise.
-    float settled = stable ? weight_gr : w_sum / SETTLE_WINDOW_LEN;
+    float settled = stable ? weight_gr : w_sum / window;
 
     if (isnan(ctrl->landing_weight_gr)) {
         ctrl->landing_weight_gr = settled;
@@ -631,7 +792,7 @@ static void ctrl_step_settle(trickle_ctrl_t * ctrl, float t_now, float weight_gr
             // Slow pulses: less powder in flight, smaller chance that a
             // clump arrives after the pulse ended
             float revs = TOPUP_DELIVERY_RATIO * amount / ctrl->model.fine_gpr;
-            float rps = clampf(revs / TOPUP_MAX_PULSE_S, ctrl->limits.fine_min_rps,
+            float rps = clampf(revs / ctrl->mode.topup_pulse_s, ctrl->limits.fine_min_rps,
                                ctrl->limits.fine_max_rps * 0.5f);
 
             ctrl->topup_rps = rps;

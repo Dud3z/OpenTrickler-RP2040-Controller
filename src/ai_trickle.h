@@ -17,7 +17,7 @@
 #include "trickle_model.h"
 
 
-#define EEPROM_AI_TRICKLE_DATA_REV          1       // 16 bit
+#define EEPROM_AI_TRICKLE_DATA_REV          2       // 16 bit
 
 #define AI_TRICKLE_HISTORY_LEN              32
 #define AI_TRICKLE_DEFAULT_LEARN_THROWS     8
@@ -39,15 +39,21 @@ typedef enum {
     AI_PRESET_PRECISION = 0,
     AI_PRESET_BALANCED = 1,
     AI_PRESET_SPEED = 2,
-    AI_PRESET_CUSTOM = 3,
+    AI_PRESET_AUTO = 3,
+    AI_PRESET_CUSTOM = 4,
 } ai_trickle_preset_t;
+
+
+// Tolerance choices of the display menu, in 0.01 grain
+#define AI_TOLERANCE_CHOICES                {1, 2, 3, 4, 5, 6, 8, 10, 15, 20}
+#define AI_TOLERANCE_CHOICE_COUNT           10
 
 
 typedef struct {
     uint16_t ai_trickle_data_rev;
 
     uint8_t enable;                 // Use the adaptive controller (0/1)
-    uint8_t precision_level;        // 0 = precision ... 100 = speed
+    uint8_t precision_level;        // Manual speed: 0 = careful ... 100 = fastest
     uint8_t auto_learn;             // Keep learning during normal charging (0/1)
     uint8_t learn_throws;           // Throws per learning session
     uint8_t mode_preset;            // ai_trickle_preset_t, for the display menu
@@ -57,6 +63,12 @@ typedef struct {
 
     // Profile name each model was learned with; a renamed profile starts fresh
     char model_names[MAX_PROFILE_CNT][PROFILE_NAME_MAX_LEN];
+
+    // Since rev 2, a rev 1 block is migrated by ai_trickle_init()
+    float tolerance_gr;             // Accepted error of an adaptive charge, independent of the speed
+    uint8_t auto_speed;             // Tune the speed of every profile automatically (0/1)
+    uint8_t reserved2[3];
+    trickle_speed_state_t speed[MAX_PROFILE_CNT];   // Automatic speed per profile
 } eeprom_ai_trickle_data_t;
 
 
@@ -83,6 +95,7 @@ bool ai_trickle_config_save(void);
 // Charge mode integration
 bool ai_trickle_adaptive_active(void);
 float ai_trickle_tolerance(void);
+uint8_t ai_trickle_speed(void);
 float ai_trickle_last_error(void);
 
 void ai_trickle_classic_begin(void);
@@ -115,6 +128,7 @@ uint8_t ai_trickle_series_total(void);
 
 // Display menu actions, return the form to go back to
 uint8_t ai_trickle_menu_apply_preset(void);
+void ai_trickle_menu_sync(void);
 uint8_t ai_trickle_menu_reset_model(void);
 const trickle_model_t * ai_trickle_selected_model(void);
 
