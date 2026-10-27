@@ -78,7 +78,7 @@ jobs:
 
     # Publish the images to the 'firmware' branch, the web updater downloads them from there
     - name: Publish Firmware for the Web Updater
-      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
       run: |
         python3 scripts/make_firmware_manifest.py --out publish
         cd publish
