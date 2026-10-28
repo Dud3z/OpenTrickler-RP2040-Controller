@@ -116,6 +116,20 @@ The **tolerance** decides when a charge is good: the scale reading must be withi
 
 Note: a single kernel of extruded powder weighs about 0.01-0.04 gr. Tolerances below one kernel weight are physically impossible for that powder, and with a 0.02 gr tolerance one stray kernel decides.
 
+### Tap
+
+After a charge, while the cup is still on the scale (display: "Remove Cup"), the **Tap** button between Start and Stop on the Trickler page turns the fine trickler by the tap angle, e.g. to add a single kernel by hand. Several taps queue up (at most 5). The result line is judged again once the kernels have landed. The angle is set under *Settings* → **AI Trickle** (default 20°); with a learned model the page shows the grains per tap.
+
+### Profiles and learning
+
+* *Settings* → **Profiles** → **New Profile** copies the shown profile under a new name into a free slot (a free slot is an unused default "ProfileN"). The new profile starts with a fresh AI model and is selected. If all 8 are in use, you choose one to overwrite.
+* Before a learning session the AI page asks **which profile to learn into**: an existing one, or a new one with a name (settings copied from the current profile). Learning into a profile that already has a model asks for confirmation, so a different powder does not spoil an existing profile by accident. The chosen profile stays selected afterwards.
+* On the display, *Learn Profile* starts with choosing an existing profile.
+
+### Top up strategy
+
+From speed 50 on, a top up starts as soon as the scale shows the charge is clearly short (no full settle first), asks for 80% of the missing powder and is judged after a shorter wait. At low speed the careful strategy stays (70%, full settle). In the strategy sweep (`tests/sim/trickle_bench sweep`, 15/5 rev/s, ±0.02 gr, 23 and 44 gr, ball/short extruded/flake) this brought 13.6 s → 13.1 s per charge with slightly more charges in tolerance. Trains of short top up pulses were also tried: about 2% more charges in tolerance, but 2-5 s slower per charge.
+
 ### How the other settings are used
 
 * **Motor settings:** the max/min speed caps the profile speeds (the lower value wins), the acceleration and gear ratio give the motor ramp. The controller ramps its commands the same way and counts the powder that still comes while a motor slows down. Settings → AI Trickle shows the limits in use and warns when a motor setting caps the profile.

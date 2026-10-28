@@ -541,8 +541,101 @@ static int speed_study(int eval_throws) {
 }
 
 
+/*
+ * Strategy sweep: the same charges with different settle / top up
+ * strategies (trickle_tuning_t), to pick the defaults.
+ */
+typedef struct {
+    const char * name;
+    trickle_tuning_t tuning;
+} tuning_variant_t;
+
+
+static int tuning_sweep(int eval_throws) {
+    static powder_sim_t sim;
+    static trickle_trace_t trace;
+    powder_sim_scale_t scale;
+    powder_sim_default_scale(&scale);
+
+    const trickle_tuning_t base = trickle_tuning;
+    tuning_variant_t variants[24];
+    int n = 0;
+    trickle_tuning_t t;
+    // The defaults won the first sweep; the old strategy for comparison
+    trickle_tuning_t best = base;
+    t = base; t.early_topup = 0; t.topup_settle_extra_s = 0.25f; t.topup_ratio = 0.7f;
+    variants[n++] = (tuning_variant_t) {"previous", t};
+    variants[n++] = (tuning_variant_t) {"current", best};
+    t = base; t.topup_style = TRICKLE_TOPUP_TRAIN;
+    variants[n++] = (tuning_variant_t) {"train 0.1s/0.5lat", t};
+    t = base; t.topup_ratio = 0.7f;
+    variants[n++] = (tuning_variant_t) {"ratio 0.7", t};
+    t = best; t.fine_prime_s = 0.8f;
+    variants[n++] = (tuning_variant_t) {"+ prime 0.8s", t};
+    t = best; t.fine_prime_s = 2.5f;
+    variants[n++] = (tuning_variant_t) {"+ prime 2.5s", t};
+    t = best; t.coarse_handover_ratio = 0.6f;
+    variants[n++] = (tuning_variant_t) {"+ handover 0.6", t};
+    t = best; t.coarse_handover_ratio = 1.6f;
+    variants[n++] = (tuning_variant_t) {"+ handover 1.6", t};
+    t = best; t.end_allowance_factor = 0.25f;
+    variants[n++] = (tuning_variant_t) {"+ end allowance 0.25", t};
+    t = best; t.end_allowance_factor = 0.8f;
+    variants[n++] = (tuning_variant_t) {"+ end allowance 0.8", t};
+    t = best; t.settle_extra_s = 0.15f;
+    variants[n++] = (tuning_variant_t) {"+ settle 0.15", t};
+
+    classic_profile_t fast = classic_profile;
+    fast.coarse_max_rps = 15.0f;
+    fast.fine_max_rps = 5.0f;
+    const float targets[] = {23.0f, 44.0f};
+    const uint8_t speeds[] = {50, 100};
+    const powder_sim_preset_t presets[] = {POWDER_SIM_BALL, POWDER_SIM_SHORT_EXTRUDED, POWDER_SIM_FLAKE};
+
+    printf("Strategy sweep, limits 15/5 rps, tolerance 0.02, %d throws per cell\n", eval_throws);
+    printf("  %-22s", "variant");
+    for (unsigned pr = 0; pr < 3; pr += 1) {
+        printf(" | %-26s", powder_sim_get_preset(presets[pr])->name);
+    }
+    printf(" | all\n");
+
+    for (int v = 0; v < n; v += 1) {
+        trickle_tuning = variants[v].tuning;
+        printf("  %-22s", variants[v].name);
+        double all_time = 0.0, all_in = 0.0, all_over = 0.0;
+        int cells = 0;
+        for (unsigned pr = 0; pr < 3; pr += 1) {
+            double time = 0.0, in = 0.0, over = 0.0;
+            int k = 0;
+            for (unsigned ti = 0; ti < 2; ti += 1) {
+                for (unsigned si = 0; si < 2; si += 1) {
+                    trickle_mode_params_t mode;
+                    trickle_mode_params(speeds[si], 0.02f, &mode);
+                    config_result_t r;
+                    run_config(&sim, &trace, powder_sim_get_preset(presets[pr]), &scale,
+                               7000 + pr * 100 + ti * 10 + si, &fast, &mode, targets[ti], eval_throws, &r);
+                    time += r.stats.time_sum / r.stats.n;
+                    in += 100.0 * r.stats.reading_in_tol / r.stats.n;
+                    over += 100.0 * r.stats.over_tol / r.stats.n;
+                    k += 1;
+                }
+            }
+            printf(" | %5.1fs in %5.1f%% ov %4.1f%% =%5.1f", time / k, in / k, over / k, time / k / (in / k / 100.0));
+            all_time += time / k; all_in += in / k; all_over += over / k; cells += 1;
+        }
+        printf(" | %5.1fs %5.1f%% %4.1f%% =%5.1f s per good charge\n", all_time / cells, all_in / cells, all_over / cells,
+               all_time / cells / (all_in / cells / 100.0));
+    }
+    trickle_tuning = base;
+    return 0;
+}
+
+
 int main(int argc, char ** argv) {
     int eval_throws = EVAL_THROWS;
+    if (argc > 1 && strcmp(argv[1], "sweep") == 0) {
+        return tuning_sweep(argc > 2 ? atoi(argv[2]) : 60);
+    }
     if (argc > 1 && strcmp(argv[1], "study") == 0) {
         bench_debug = getenv("BENCH_DEBUG") != NULL;
         bench_throws = getenv("BENCH_THROWS") != NULL;

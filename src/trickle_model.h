@@ -81,6 +81,9 @@ typedef struct {
     float overshoot_sigma;      // Aim low enough that landing above target + tolerance is this unlikely (sigma)
     float topup_threshold_gr;   // Top up when the settled weight is this much below target (grain)
     float topup_pulse_s;        // Longest top up pulse, shorter is faster but less gentle (s)
+    float topup_ratio;          // Share of the missing powder a top up asks for
+    float topup_settle_extra_s; // Settle wait after a top up on top of the latency (s)
+    uint8_t early_topup;        // Top up before the scale is fully settled when clearly short
     float settle_timeout_s;     // Maximum wait for the scale to settle (s)
     uint8_t settle_samples;     // Stable readings needed before judging the weight
 } trickle_mode_params_t;
@@ -181,6 +184,10 @@ typedef struct {
     uint8_t topup_count;
     float topup_end_t;
     float topup_rps;
+    float topup_goal_gr;
+    float topup_pause_end_t;
+    bool topup_pulse_on;
+    uint8_t topup_pulses;
 
     // No flow detection
     float flow_check_t;
@@ -243,6 +250,29 @@ typedef struct {
     float aim_below_gr;         // Aim offset used for the throw, without the learned stop bias
 } trickle_throw_result_t;
 
+
+/*
+ * Strategy details of settling and topping up. Fixed in the firmware, the
+ * host benchmark varies them to compare strategies.
+ */
+typedef struct {
+    float settle_extra_s;       // Wait at least latency + this after a stop before judging the scale
+    float settle_range_gr;      // Max-min of the settle window to count as stable
+    float topup_ratio;          // Share of the missing powder a timed top up pulse asks for
+    uint8_t topup_style;        // TRICKLE_TOPUP_*
+    float topup_short_pulse_s;  // Pulse length of the pulse train
+    float topup_pause_factor;   // Pause after each pulse, in latencies
+    uint8_t early_topup;        // Start a top up before the scale is fully settled when clearly short
+    float topup_settle_extra_s; // Settle wait after a top up (less powder in flight than after the main stop)
+    float fine_prime_s;         // Start the fine trickler this long before the coarse stop
+    float coarse_handover_ratio;// Stop the coarse trickler when it is this close to the fine flow
+    float end_allowance_factor; // Share of the tolerance a surge at the end of the fine approach may use, at speed 100
+} trickle_tuning_t;
+
+#define TRICKLE_TOPUP_TIMED     0       // One pulse for a share of the missing powder, then settle
+#define TRICKLE_TOPUP_TRAIN     1       // Short pulses, after each one check the prediction
+
+extern trickle_tuning_t trickle_tuning;
 
 // Mode
 void trickle_mode_params(uint8_t speed, float tolerance_gr, trickle_mode_params_t * params);

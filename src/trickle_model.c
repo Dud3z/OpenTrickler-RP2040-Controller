@@ -19,12 +19,7 @@
 
 // Controller constants
 #define COARSE_APPROACH_TIME_S      0.6f        // Time constant when the coarse trickler slows down
-#define FINE_PRIME_S                1.5f        // Start the fine trickler this long before the coarse stop
-#define COARSE_HANDOVER_RATIO       1.0f        // Stop the coarse trickler when it is this close to the fine flow
-#define SETTLE_MIN_EXTRA_S          0.25f       // Wait at least latency + this before judging the scale
-#define SETTLE_STABLE_RANGE_GR      0.03f       // Max-min of the settle window to be considered stable
 #define SETTLE_WINDOW_MAX           8
-#define TOPUP_DELIVERY_RATIO        0.7f        // Ask the top up pulse for 70% of the missing powder
 #define FLOW_CHECK_WINDOW_S         4.0f
 #define FLOW_CHECK_MIN_EXPECTED_GR  0.6f
 #define CHARGE_TIMEOUT_S            240.0f
@@ -64,6 +59,28 @@ static float lerpf(float a, float b, float x) {
 static float gerpf(float a, float b, float x) {
     return a * powf(b / a, x);
 }
+
+
+/*
+ * Picked with the strategy sweep (tests/sim, "trickle_bench sweep"): start a
+ * top up as soon as the scale shows the charge is clearly short, ask it for
+ * 80% of the missing powder and judge it again after a shorter wait (little
+ * powder is in flight after a slow top up pulse). Pulse trains of short
+ * pulses were more accurate but cost 2-5 s per charge.
+ */
+trickle_tuning_t trickle_tuning = {
+    .settle_extra_s = 0.25f,
+    .settle_range_gr = 0.03f,
+    .topup_ratio = 0.8f,
+    .topup_style = TRICKLE_TOPUP_TIMED,
+    .topup_short_pulse_s = 0.1f,
+    .topup_pause_factor = 0.5f,
+    .early_topup = 1,
+    .topup_settle_extra_s = 0.1f,
+    .fine_prime_s = 1.5f,
+    .coarse_handover_ratio = 1.0f,
+    .end_allowance_factor = 0.5f,
+};
 
 
 // Move towards target by at most max_step, max_step <= 0 means no limit
@@ -112,13 +129,19 @@ void trickle_mode_params(uint8_t speed, float tolerance_gr, trickle_mode_params_
     params->aim_below_gr = params->tolerance_gr * 0.5f * (1.0f - x);
     params->overshoot_sigma = 2.0f;
     params->fine_surge_sigma = lerpf(4.0f, 2.0f, x);
-    params->end_allowance_gr = params->tolerance_gr * 0.5f * x;
+    params->end_allowance_gr = params->tolerance_gr * trickle_tuning.end_allowance_factor * x;
     // Precision tops up anything in the lower half of the band, speed only
     // what is actually outside the tolerance. The small slack keeps a reading
     // exactly at target - tolerance inside.
     params->topup_threshold_gr = params->tolerance_gr * lerpf(0.5f, 1.0f, x) + 0.002f;
     params->topup_pulse_s = gerpf(3.0f, 0.4f, x);
     params->settle_timeout_s = lerpf(4.0f, 2.0f, x);
+
+    // Careful top ups at low speed (a clump in a top up is an over charge),
+    // the faster strategy from trickle_tuning from the middle on
+    params->topup_ratio = lerpf(0.7f, trickle_tuning.topup_ratio, x);
+    params->topup_settle_extra_s = lerpf(trickle_tuning.settle_extra_s, trickle_tuning.topup_settle_extra_s, x);
+    params->early_topup = trickle_tuning.early_topup && x >= 0.5f;
     params->settle_samples = x > 0.5f ? 3 : 4;
 }
 
@@ -645,7 +668,7 @@ static void ctrl_step_main(trickle_ctrl_t * ctrl, float t_now, float weight_gr) 
             // Once the slowed down coarse trickler delivers less than the fine
             // trickler at full speed, the fine trickler is the faster way to
             // finish: hand over instead of crawling with the coarse one.
-            float handover_flow = COARSE_HANDOVER_RATIO * ctrl->model.fine_gpr * ctrl->limits.fine_max_rps;
+            float handover_flow = trickle_tuning.coarse_handover_ratio * ctrl->model.fine_gpr * ctrl->limits.fine_max_rps;
             if (rps * ctrl->model.coarse_gpr < handover_flow && ctrl->t_coarse_stop < 0.0f) {
                 ctrl->coarse_rps = 0.0f;
                 ctrl->t_coarse_stop = t_now;
@@ -661,7 +684,7 @@ static void ctrl_step_main(trickle_ctrl_t * ctrl, float t_now, float weight_gr) 
             // indistinguishable from the coarse flow for the model fit.
             float coarse_flow = ctrl->model.coarse_gpr * ctrl->coarse_rps;
             float time_to_stop = coarse_flow > 0.0f ? remaining / coarse_flow : 0.0f;
-            ctrl->fine_rps = time_to_stop < FINE_PRIME_S ? ctrl->limits.fine_max_rps : 0.0f;
+            ctrl->fine_rps = time_to_stop < trickle_tuning.fine_prime_s ? ctrl->limits.fine_max_rps : 0.0f;
             return;
         }
     }
@@ -751,12 +774,49 @@ static void ctrl_step_probe(trickle_ctrl_t * ctrl, float t_now, float weight_gr)
 }
 
 
+static void ctrl_start_topup(trickle_ctrl_t * ctrl, float t_now, float settled) {
+    // Aim the top up at the middle of the lower half of the tolerance band
+    float goal = ctrl->target_gr - 0.25f * ctrl->mode.tolerance_gr;
+    float amount = goal - settled;
+    if (amount < 0.5f * ctrl->mode.tolerance_gr) {
+        amount = 0.5f * ctrl->mode.tolerance_gr;
+    }
+
+    ctrl->topup_goal_gr = goal;
+    ctrl->topup_count += 1;
+    ctrl->phase = TRICKLE_PHASE_TOPUP;
+    ctrl->t_phase = t_now;
+    ctrl->events |= TRICKLE_EVENT_TOPUP_STARTED;
+
+    if (trickle_tuning.topup_style == TRICKLE_TOPUP_TRAIN) {
+        // Each short pulse brings about a third of what is missing, at
+        // most half the tolerance, so a single pulse cannot overshoot
+        float pulse_gr = fminf(amount / 3.0f, 0.5f * ctrl->mode.tolerance_gr);
+        float rps = pulse_gr / ctrl->model.fine_gpr / trickle_tuning.topup_short_pulse_s;
+        ctrl->topup_rps = clampf(rps, ctrl->limits.fine_min_rps, ctrl->limits.fine_max_rps * 0.5f);
+        ctrl->topup_pulse_on = false;
+        ctrl->topup_pause_end_t = t_now;
+        ctrl->topup_pulses = 0;
+        return;
+    }
+
+    // Slow pulses: less powder in flight, smaller chance that a clump
+    // arrives after the pulse ended
+    float revs = ctrl->mode.topup_ratio * amount / ctrl->model.fine_gpr;
+    float rps = clampf(revs / ctrl->mode.topup_pulse_s, ctrl->limits.fine_min_rps,
+                       ctrl->limits.fine_max_rps * 0.5f);
+    ctrl->topup_rps = rps;
+    ctrl->topup_end_t = t_now + revs / rps;
+}
+
+
 static void ctrl_step_settle(trickle_ctrl_t * ctrl, float t_now, float weight_gr) {
     ctrl->coarse_rps = 0.0f;
     ctrl->fine_rps = 0.0f;
 
     float elapsed = t_now - ctrl->t_phase;
-    if (elapsed < ctrl->model.latency_s + SETTLE_MIN_EXTRA_S) {
+    float extra = ctrl->topup_count > 0 ? ctrl->mode.topup_settle_extra_s : trickle_tuning.settle_extra_s;
+    if (elapsed < ctrl->model.latency_s + extra) {
         return;
     }
 
@@ -777,6 +837,22 @@ static void ctrl_step_settle(trickle_ctrl_t * ctrl, float t_now, float weight_gr
         ctrl->settle_window[window - 1] = weight_gr;
     }
 
+    // Clearly short: no need to wait for a fully settled scale before topping up
+    if (ctrl->mode.early_topup && ctrl->settle_count >= 2 && ctrl->topup_count < TRICKLE_MAX_TOPUPS) {
+        uint8_t n = ctrl->settle_count < window ? ctrl->settle_count : window;
+        float last = ctrl->settle_window[n - 1];
+        float prev = ctrl->settle_window[n - 2];
+        float short_by = ctrl->target_gr - last;
+        if (fabsf(last - prev) <= trickle_tuning.settle_range_gr &&
+            short_by > ctrl->mode.topup_threshold_gr + 2.0f * ctrl->mode.tolerance_gr) {
+            if (isnan(ctrl->landing_weight_gr)) {
+                ctrl->landing_weight_gr = last;
+            }
+            ctrl_start_topup(ctrl, t_now, last);
+            return;
+        }
+    }
+
     if (ctrl->settle_count < window) {
         return;
     }
@@ -791,7 +867,7 @@ static void ctrl_step_settle(trickle_ctrl_t * ctrl, float t_now, float weight_gr
         w_sum += w;
     }
 
-    bool stable = (w_max - w_min) <= SETTLE_STABLE_RANGE_GR;
+    bool stable = (w_max - w_min) <= trickle_tuning.settle_range_gr;
     bool timeout = elapsed >= ctrl->model.latency_s + ctrl->mode.settle_timeout_s;
     if (!stable && !timeout) {
         return;
@@ -807,27 +883,8 @@ static void ctrl_step_settle(trickle_ctrl_t * ctrl, float t_now, float weight_gr
 
     float missing = ctrl->target_gr - settled;
     if (missing > ctrl->mode.topup_threshold_gr && ctrl->topup_count < TRICKLE_MAX_TOPUPS) {
-        // Aim the top up at the middle of the lower half of the tolerance band
-        float goal = ctrl->target_gr - 0.25f * ctrl->mode.tolerance_gr;
-        float amount = goal - settled;
-        if (amount < 0.5f * ctrl->mode.tolerance_gr) {
-            amount = 0.5f * ctrl->mode.tolerance_gr;
-        }
-        if (amount > 0.0f) {
-            // Slow pulses: less powder in flight, smaller chance that a
-            // clump arrives after the pulse ended
-            float revs = TOPUP_DELIVERY_RATIO * amount / ctrl->model.fine_gpr;
-            float rps = clampf(revs / ctrl->mode.topup_pulse_s, ctrl->limits.fine_min_rps,
-                               ctrl->limits.fine_max_rps * 0.5f);
-
-            ctrl->topup_rps = rps;
-            ctrl->topup_end_t = t_now + revs / rps;
-            ctrl->topup_count += 1;
-            ctrl->phase = TRICKLE_PHASE_TOPUP;
-            ctrl->t_phase = t_now;
-            ctrl->events |= TRICKLE_EVENT_TOPUP_STARTED;
-            return;
-        }
+        ctrl_start_topup(ctrl, t_now, settled);
+        return;
     }
 
     ctrl->final_weight_gr = settled;
@@ -837,6 +894,39 @@ static void ctrl_step_settle(trickle_ctrl_t * ctrl, float t_now, float weight_gr
 
 static void ctrl_step_topup(trickle_ctrl_t * ctrl, float t_now, float weight_gr) {
     ctrl->coarse_rps = 0.0f;
+
+    if (trickle_tuning.topup_style == TRICKLE_TOPUP_TRAIN) {
+        if (ctrl->topup_pulse_on) {
+            if (t_now < ctrl->topup_end_t && weight_gr < ctrl->target_gr) {
+                ctrl->fine_rps = ctrl->topup_rps;
+                return;
+            }
+            // Pulse done, pause so its kernels can land and be seen
+            ctrl->fine_rps = 0.0f;
+            ctrl->topup_pulse_on = false;
+            ctrl->topup_pause_end_t = t_now + trickle_tuning.topup_pause_factor * ctrl->model.latency_s;
+            return;
+        }
+
+        ctrl->fine_rps = 0.0f;
+        if (t_now < ctrl->topup_pause_end_t) {
+            return;
+        }
+
+        // Next pulse only while the prediction (scale plus powder still in
+        // flight) says the charge is short
+        float predicted = weight_gr + trickle_ctrl_inflight_gr(ctrl, t_now);
+        float pulse_gr = ctrl->model.fine_gpr * ctrl->topup_rps * trickle_tuning.topup_short_pulse_s;
+        if (predicted + 0.5f * pulse_gr < ctrl->topup_goal_gr && ctrl->topup_pulses < 12) {
+            ctrl->topup_pulse_on = true;
+            ctrl->topup_pulses += 1;
+            ctrl->topup_end_t = t_now + trickle_tuning.topup_short_pulse_s;
+            ctrl->fine_rps = ctrl->topup_rps;
+            return;
+        }
+        ctrl_enter_settle(ctrl, t_now);
+        return;
+    }
 
     // Stop the pulse when it is complete or the target is reached early
     if (t_now >= ctrl->topup_end_t || weight_gr >= ctrl->target_gr) {
