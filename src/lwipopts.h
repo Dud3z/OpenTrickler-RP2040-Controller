@@ -25,6 +25,17 @@
 #define LWIP_SO_RCVTIMEO 1
 #endif
 
+// lwIP heap: one block per web connection and the packet headers of what
+// is sent come from here. The 4000 bytes of the SDK example were just enough
+// and ran out when more requests came at once (empty responses). The TLS
+// client of the firmware download (Pico 2 W) takes its state from here too.
+#undef MEM_SIZE
+#if FW_DOWNLOAD
+#define MEM_SIZE                        32768
+#else
+#define MEM_SIZE                        8192
+#endif
+
 // Lwip features
 #define LWIP_HTTPD_CGI                  1    // Enable HTTPCGI
 #define LWIP_HTTPD_SUPPORT_POST         1    // Enable POST (firmware upload)

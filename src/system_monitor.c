@@ -291,6 +291,9 @@ static void system_monitor_task(void * p) {
         }
         neopixel_led_idle_check(busy);
 
+        // Memory of a finished firmware check goes back to the web server
+        fw_download_idle_cleanup();
+
         // New firmware on GitHub (Pico 2 W): shown in the menu. Never while
         // charging, and not when the display menu checks itself
         uint32_t uptime_s = to_ms_since_boot(get_absolute_time()) / 1000;

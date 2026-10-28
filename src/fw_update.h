@@ -49,6 +49,7 @@ bool fw_download_supported(void);
 bool fw_download_check(void);
 bool fw_download_install(void);
 void fw_download_abandon(const char * reason);
+void fw_download_idle_cleanup(void);
 void fw_download_status(fw_download_status_t * status);
 bool fw_update_available(void);
 bool fw_update_apply(void);

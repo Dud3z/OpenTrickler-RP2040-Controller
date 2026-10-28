@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "pico.h"
+#include "pico/time.h"
 #include "lwip/apps/httpd.h"
 #include "lwip/pbuf.h"
 
@@ -725,6 +726,37 @@ bool fw_download_install(void) {
     return dl_start(DL_JOB_IMAGE, FW_IMAGE_NAME);
 #else
     return false;
+#endif
+}
+
+
+// The TLS config (root certificates, random generator) is only kept while a
+// request runs: freed a while after the last one finished, so the memory is
+// free for the web server again. Called about once a second.
+void fw_download_idle_cleanup(void) {
+#if FW_DOWNLOAD
+    static uint32_t idle_since_ms = 0;
+    uint32_t now = to_ms_since_boot(get_absolute_time());
+
+    // All under the lwIP lock: a request may start at the same time
+    cyw43_arch_lwip_begin();
+    bool busy = dl_state == FW_DOWNLOAD_CHECKING || dl_state == FW_DOWNLOAD_DOWNLOADING;
+    bool allocated = dl_tls_config != NULL || dl_tls_config_old != NULL;
+    if (busy || !allocated) {
+        idle_since_ms = now;
+    }
+    // The closing connection may still use the config for a moment
+    else if (now - idle_since_ms >= 10000) {
+        if (dl_tls_config_old != NULL) {
+            altcp_tls_free_config(dl_tls_config_old);
+            dl_tls_config_old = NULL;
+        }
+        if (dl_tls_config != NULL) {
+            altcp_tls_free_config(dl_tls_config);
+            dl_tls_config = NULL;
+        }
+    }
+    cyw43_arch_lwip_end();
 #endif
 }
 
