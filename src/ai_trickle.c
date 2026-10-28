@@ -310,6 +310,53 @@ float ai_trickle_fine_reverse_revs(void) {
 }
 
 
+void ai_trickle_set_fine_reverse(const char * value) {
+    uint8_t previous = ai_trickle_data.fine_reverse_centirev;
+    float revs = strtof(value, NULL);
+    if (strcmp(value, "auto") == 0 || revs < 0.0f) {
+        ai_trickle_data.fine_reverse_centirev = AI_FINE_REVERSE_AUTO;
+    }
+    else if (strcmp(value, "off") == 0 || revs <= 0.0f) {
+        ai_trickle_data.fine_reverse_centirev = AI_FINE_REVERSE_OFF;
+    }
+    else if (revs <= AI_FINE_REVERSE_MAX_CENTIREV * 0.01f) {
+        uint8_t centirev = (uint8_t) (revs * 100.0f + 0.5f);
+        ai_trickle_data.fine_reverse_centirev = centirev ? centirev : 1;
+    }
+    if (ai_trickle_data.fine_reverse_centirev != previous) {
+        // The measured dribble belongs to the old setting
+        for (int i = 0; i < MAX_PROFILE_CNT; i += 1) {
+            trickle_reverse_reset(&ai_trickle_data.reverse[i]);
+        }
+    }
+}
+
+
+// JSON value of the setting: "auto", "off" or the revolutions
+const char * ai_trickle_fine_reverse_setting(void) {
+    static char buf[16];
+    uint8_t setting = ai_trickle_data.fine_reverse_centirev;
+    if (setting == AI_FINE_REVERSE_AUTO) {
+        return "\"auto\"";
+    }
+    if (setting == AI_FINE_REVERSE_OFF) {
+        return "\"off\"";
+    }
+    snprintf(buf, sizeof(buf), "%.2f", setting * 0.01f);
+    return buf;
+}
+
+
+// Classic (PID) charges measure no dribble, Auto uses a short safe value there
+float ai_trickle_classic_fine_reverse_revs(void) {
+    uint8_t setting = ai_trickle_data.fine_reverse_centirev;
+    if (setting == AI_FINE_REVERSE_AUTO) {
+        return AI_FINE_REVERSE_CLASSIC_AUTO_REVS;
+    }
+    return setting == AI_FINE_REVERSE_OFF ? 0.0f : setting * 0.01f;
+}
+
+
 static float choose_reverse(uint8_t idx) {
     trickle_reverse_state_t * state = &ai_trickle_data.reverse[idx];
     uint8_t setting = ai_trickle_data.fine_reverse_centirev;
@@ -923,25 +970,7 @@ bool http_rest_ai_config(struct fs_file *file, int num_params, char *params[], c
             }
         }
         else if (strcmp(params[idx], "a8") == 0) {
-            // "auto", "off" or revolutions (0 = off)
-            uint8_t previous = ai_trickle_data.fine_reverse_centirev;
-            float revs = strtof(values[idx], NULL);
-            if (strcmp(values[idx], "auto") == 0 || revs < 0.0f) {
-                ai_trickle_data.fine_reverse_centirev = AI_FINE_REVERSE_AUTO;
-            }
-            else if (strcmp(values[idx], "off") == 0 || revs <= 0.0f) {
-                ai_trickle_data.fine_reverse_centirev = AI_FINE_REVERSE_OFF;
-            }
-            else if (revs <= AI_FINE_REVERSE_MAX_CENTIREV * 0.01f) {
-                uint8_t centirev = (uint8_t) (revs * 100.0f + 0.5f);
-                ai_trickle_data.fine_reverse_centirev = centirev ? centirev : 1;
-            }
-            if (ai_trickle_data.fine_reverse_centirev != previous) {
-                // The measured dribble belongs to the old setting
-                for (int i = 0; i < MAX_PROFILE_CNT; i += 1) {
-                    trickle_reverse_reset(&ai_trickle_data.reverse[i]);
-                }
-            }
+            ai_trickle_set_fine_reverse(values[idx]);
         }
         else if (strcmp(params[idx], "a7") == 0) {
             int degrees = atoi(values[idx]);
@@ -988,20 +1017,8 @@ bool http_rest_ai_config(struct fs_file *file, int num_params, char *params[], c
     // Fine tube reverse: setting, and what the profile uses / has learned
     trickle_reverse_state_t * reverse = &ai_trickle_data.reverse[pf];
     uint8_t rev_setting = ai_trickle_data.fine_reverse_centirev;
-    char a8_buf[16];
-    float rev_in_use;
-    if (rev_setting == AI_FINE_REVERSE_AUTO) {
-        snprintf(a8_buf, sizeof(a8_buf), "\"auto\"");
-        rev_in_use = trickle_reverse_candidate_revs(reverse->current);
-    }
-    else if (rev_setting == AI_FINE_REVERSE_OFF) {
-        snprintf(a8_buf, sizeof(a8_buf), "\"off\"");
-        rev_in_use = 0.0f;
-    }
-    else {
-        snprintf(a8_buf, sizeof(a8_buf), "%.2f", rev_setting * 0.01f);
-        rev_in_use = rev_setting * 0.01f;
-    }
+    float rev_in_use = rev_setting == AI_FINE_REVERSE_AUTO ?
+                       trickle_reverse_candidate_revs(reverse->current) : ai_trickle_classic_fine_reverse_revs();
 
     snprintf(buf, sizeof(buf),
              "%s"
@@ -1016,7 +1033,7 @@ bool http_rest_ai_config(struct fs_file *file, int num_params, char *params[], c
              boolean_to_string(ai_trickle_data.auto_speed),
              tolerance_for_profile(pf),
              (int) ai_trickle_tap_degrees(),
-             a8_buf,
+             ai_trickle_fine_reverse_setting(),
              rev_in_use,
              trickle_reverse_expected_rise_gr(reverse),
              reverse->count[0], reverse->count[1], reverse->count[2],

@@ -37,6 +37,7 @@
 #define AI_FINE_REVERSE_AUTO                0
 #define AI_FINE_REVERSE_OFF                 255
 #define AI_FINE_REVERSE_MAX_CENTIREV        30
+#define AI_FINE_REVERSE_CLASSIC_AUTO_REVS   0.02f   // Auto without AI Trickle (nothing is learned there)
 
 
 typedef enum {
@@ -110,6 +111,11 @@ float ai_trickle_tolerance(void);
 uint8_t ai_trickle_speed(void);
 float ai_trickle_tap_degrees(void);
 float ai_trickle_fine_reverse_revs(void);
+// Fine tube reverse setting (Settings -> Charge Mode, stored with the AI data
+// since it is learned per profile in Auto): "auto", "off" or revolutions
+void ai_trickle_set_fine_reverse(const char * value);
+const char * ai_trickle_fine_reverse_setting(void);
+float ai_trickle_classic_fine_reverse_revs(void);
 float ai_trickle_last_error(void);
 
 void ai_trickle_classic_begin(void);
