@@ -894,7 +894,10 @@ void charge_mode_wait_for_cup_removal() {
         }
         if (tap_judge_pending && xTaskGetTickCount() >= tap_judge_tick) {
             tap_judge_pending = false;
-            charge_mode_show_result(scale_get_current_measurement());
+            float tapped = scale_get_current_measurement();
+            charge_mode_show_result(tapped);
+            // The charge log keeps the weight after the taps
+            ai_trickle_history_update_final(tapped);
         }
 
         // Perform measurement

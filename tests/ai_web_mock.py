@@ -38,7 +38,8 @@ STATE = {
     'config': {'a0': True, 'a1': 50, 'a2': True, 'a3': 8, 'a4': True, 'a5': 0.02, 'tol': 0.02, 'sp': 70,
                'as': [0.04, 0.6, 9.8, 70, 9.6], 'lim': [0.1, 5.0, 0.08, 2.0], 'pmx': [8.0, 2.0], 'acc': [62.5, 90.9],
                'est': 24.0, 'tg': 42.0,
-               'pf': 0, 'pn': EXPORT['model']['pn'], 'rd': True},
+               'pf': 0, 'pn': EXPORT['model']['pn'], 'rd': True, 'a7': 20, 'a8': 'auto', 'kw': 0.021, 'tg1': 0.011,
+               'rv': [0.02, 0.012, 6, 6, 3, 0.02]},
     'model': EXPORT['model'],
     'history': EXPORT['history'],
     'trace': EXPORT['trace'],
@@ -60,7 +61,9 @@ PROFILE = {'pf': 0, 'p0': 0, 'p1': 0, 'p2': EXPORT['model']['pn'], 'p3': 0.05, '
            'p7': 8.0, 'p8': 0.8, 'p9': 0.0, 'p10': 15.0, 'p11': 0.08, 'p12': 2.0}
 CHARGE_MODE = {'c1': '#00ff00', 'c2': '#ffff00', 'c3': '#ff0000', 'c4': '#0000ff', 'c5': 5.0, 'c6': 0.03,
                'c7': 0.02, 'c8': 0.02, 'c9': 0, 'c10': False, 'c11': 1000, 'c12': 2.0, 'c13': 0.0, 'c14': True,
-               'c15': 0.25, 'c16': 1.0}
+               'c15': 0.25, 'c16': 1.0, 'c17': 'auto'}
+
+RECIPES = {'r': [['.308 Match', '175 SMK, CCI BR2', 42.0, 0]], 'a': -1}
 
 SERVO = {'c0': False, 'c1': 0.05, 'c2': 0.1, 'c3': 0.05, 'c4': 0.1, 'c5': 1.0, 'c6': 1.0}
 
@@ -124,6 +127,8 @@ class Handler(BaseHTTPRequestHandler):
                 c['a2'] = as_bool(q['a2'])
             if 'a3' in q:
                 c['a3'] = int(q['a3'])
+            if 'a7' in q:
+                c['a7'] = int(q['a7'])
             self.send_json(c)
         elif url.path == '/rest/ai_model':
             pf = int(q.get('pf', 0))
@@ -152,8 +157,42 @@ class Handler(BaseHTTPRequestHandler):
                             'ld': STATE['learn']['ld'], 'lt': STATE['learn']['lt'], 'lc': False,
                             'seq': last[0], 'le': round(last[3] - last[2], 3), 'lad': True, 'tu': last[6]})
         elif url.path == '/rest/ai_history':
+            # Like the firmware: pages of 40, the oldest first, with tolerance, recipe and uptime
+            if as_bool(q.get('ns', 'false')):
+                STATE['session'] = STATE['history'][-1][0]
             since = int(q.get('since', 0))
-            self.send_json({'seq': STATE['history'][-1][0], 'h': [h for h in STATE['history'] if h[0] > since]})
+            rows = [h for h in STATE['history'] if h[0] > since]
+            page = [(h + [0.02, 0 if abs(h[2] - 42.0) < 0.001 else -1, 60 + h[0] * 30])[:12] for h in rows[:40]]
+            self.send_json({'seq': STATE['history'][-1][0], 'ss': STATE.get('session', 0), 'up': 9999,
+                            'more': len(rows) > 40, 'h': page})
+        elif url.path == '/rest/recipes':
+            r = RECIPES['r']
+            ok = True
+            if 'i' in q:
+                i = int(q['i'])
+                if i == len(r):
+                    r.append([f'Recipe {i + 1}', '', 42.0, STATE['selected']])
+                if 'n' in q:
+                    r[i][0] = q['n']
+                if 'no' in q:
+                    r[i][1] = q['no']
+                if 't' in q:
+                    r[i][2] = float(q['t'])
+                if 'p' in q:
+                    r[i][3] = int(q['p'])
+            if 'del' in q:
+                r.pop(int(q['del']))
+                RECIPES['a'] = -1
+            if 'up' in q:
+                u = int(q['up'])
+                r[u - 1], r[u] = r[u], r[u - 1]
+            if 'apply' in q:
+                a = int(q['apply'])
+                RECIPES['a'] = a
+                STATE['selected'] = r[a][3]
+                STATE['config']['pf'] = r[a][3]
+                STATE['config']['pn'] = NAMES[r[a][3]]
+            self.send_json({'a': RECIPES['a'], 'ok': ok, 'r': r})
         elif url.path == '/rest/ai_trace':
             self.send_json(STATE['trace'])
         elif url.path == '/rest/ai_learn':
@@ -200,7 +239,10 @@ class Handler(BaseHTTPRequestHandler):
         elif url.path == '/rest/charge_mode_config':
             for key in CHARGE_MODE:
                 if key in q:
-                    CHARGE_MODE[key] = float(q[key])
+                    try:
+                        CHARGE_MODE[key] = float(q[key])
+                    except ValueError:
+                        CHARGE_MODE[key] = q[key]
             self.send_json(CHARGE_MODE)
         elif url.path == '/rest/ai_series':
             sr = STATE['series']

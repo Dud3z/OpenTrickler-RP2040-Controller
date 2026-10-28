@@ -52,6 +52,8 @@ Join our [discord server](https://discord.gg/ZhdThA2vrW) for help and developmen
 
 * Series and ladder mode, scale diagnostics, model backup
 
+* Recipes (charge weight + powder profile in one step) and session statistics with CSV export, see [manuals/recipes_statistics_settings.md](manuals/recipes_statistics_settings.md)
+
 * Firmware update over WiFi (Pico 2 W, A/B partitions with automatic rollback)
 
 ## Get Started

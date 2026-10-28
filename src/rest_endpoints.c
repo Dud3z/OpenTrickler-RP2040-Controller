@@ -15,6 +15,7 @@
 #include "servo_gate.h"
 #include "system_control.h"
 #include "ai_trickle.h"
+#include "recipe.h"
 #include "fw_update.h"
 #include "scale_diag.h"
 
@@ -123,6 +124,7 @@ bool rest_endpoints_init(bool default_wizard) {
     rest_register_handler("/rest/ai_model", http_rest_ai_model);
     rest_register_handler("/rest/ai_status", http_rest_ai_status);
     rest_register_handler("/rest/ai_history", http_rest_ai_history);
+    rest_register_handler("/rest/recipes", http_rest_recipes);
     rest_register_handler("/rest/ai_trace", http_rest_ai_trace);
     rest_register_handler("/rest/ai_learn", http_rest_ai_learn);
     rest_register_handler("/rest/ai_series", http_rest_ai_series);

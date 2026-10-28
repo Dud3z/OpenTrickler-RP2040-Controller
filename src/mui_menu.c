@@ -15,6 +15,7 @@
 #include "profile.h"
 #include "servo_gate.h"
 #include "ai_trickle.h"
+#include "recipe.h"
 
 
 // External modules/varaibles
@@ -191,6 +192,46 @@ uint8_t render_ai_learn_next_button(mui_t * ui, uint8_t msg) {
 }
 
 
+// Recipe: apply it (profile and charge weight) and go to the warning page
+uint8_t render_recipe_next_button(mui_t * ui, uint8_t msg) {
+    switch (msg) {
+        case MUIF_MSG_CURSOR_SELECT:
+        case MUIF_MSG_VALUE_INCREMENT:
+        case MUIF_MSG_VALUE_DECREMENT:
+            if (recipe_count() == 0) {
+                return mui_GotoFormAutoCursorPosition(ui, 1);
+            }
+            recipe_menu_apply();
+            return mui_GotoFormAutoCursorPosition(ui, 13);
+        default:
+            mui_u8g2_btn_goto_wm_fi(ui, msg);
+            break;
+    }
+    return 0;
+}
+
+
+// Details of the recipe selected in the list: note, weight and profile
+uint8_t render_recipe_details(mui_t * ui, uint8_t msg) {
+    if (msg != MUIF_MSG_DRAW) {
+        return 0;
+    }
+    u8g2_t *u8g2 = mui_get_U8g2(ui);
+    u8g2_uint_t x = mui_get_x(ui);
+    u8g2_uint_t y = mui_get_y(ui);
+    const recipe_t * r = recipe_get((uint8_t) recipe_menu_idx);
+    char buf[32];
+    if (r == NULL) {
+        u8g2_DrawStr(u8g2, x, y, "Web: Settings > Recipes");
+        return 0;
+    }
+    snprintf(buf, sizeof(buf), "%.3f gr  %s", r->target_gr, profile_data.profiles[r->profile_idx].name);
+    u8g2_DrawStr(u8g2, x, y, buf);
+    u8g2_DrawStr(u8g2, x, y + 10, r->note);
+    return 0;
+}
+
+
 // Invisible field of the AI mode form: show the settings of the profile that
 // is selected now (speed, tolerance) when the form opens
 uint8_t ai_mode_form_sync(mui_t *ui, uint8_t msg) {
@@ -328,6 +369,12 @@ muif_t muif_list[] = {
 
         MUIF_BUTTON("B1", render_charge_mode_next_button),
         MUIF_BUTTON("B2", render_ai_learn_next_button),
+        MUIF_BUTTON("B3", render_recipe_next_button),
+
+        // Recipes
+        MUIF_U8G2_U16_LIST("R0", &recipe_menu_idx, NULL, recipe_menu_name, recipe_menu_count, mui_u8g2_u16_list_parent_wm_pi),
+        MUIF_U8G2_U16_LIST("R1", &recipe_menu_idx, NULL, recipe_menu_name, recipe_menu_count, mui_u8g2_u16_list_child_w1_pi),
+        MUIF_RO("R2", render_recipe_details),
 
         // Leave
         MUIF_VARIABLE("LV", &exit_state, mui_u8g2_btn_exit_wm_fi),
@@ -380,6 +427,7 @@ fds_t fds_data[] = {
     MUI_STYLE(0)
     MUI_DATA("MU", 
         MUI_10 "Start|"
+        MUI_14 "Recipes|"
         MUI_20 "Cleanup|"
         MUI_40 "Wireless|"
         MUI_30 "Settings"
@@ -399,6 +447,30 @@ fds_t fds_data[] = {
     MUI_XYT("B1",115, 59, "Next")  // Jump to form 11 or 12
     MUI_XYAT("BN",14, 59, 1, "Back")  // Jump to form 1
     MUI_XYA("P0", 5, 25, 33)  // Jump to form 33 (profile selection)
+
+    // Menu 14: Recipes (profile and charge weight in one step)
+    MUI_FORM(14)
+    MUI_STYLE(1)
+    MUI_LABEL(5,10, "Recipes")
+    MUI_XY("HL", 0,13)
+
+    MUI_STYLE(0)
+    MUI_XYT("B3",115, 59, "Next")  // Apply, then form 13
+    MUI_XYAT("BN",14, 59, 1, "Back")  // Jump to form 1
+    MUI_XYA("R0", 5, 25, 15)  // Jump to form 15 (recipe selection)
+    MUI_XY("R2", 5, 36)
+
+    // Menu 15: Child list for the recipe selection
+    MUI_FORM(15)
+    MUI_STYLE(1)
+    MUI_LABEL(5,10, "Select Recipe")
+    MUI_XY("HL", 0,13)
+
+    MUI_STYLE(0)
+    MUI_XYA("R1", 5, 25, 0)
+    MUI_XYA("R1", 5, 37, 1)
+    MUI_XYA("R1", 5, 49, 2)
+    MUI_XYA("R1", 5, 61, 3)
 
     // Menu 11: Charge Weight (2dp)
     MUI_FORM(11)

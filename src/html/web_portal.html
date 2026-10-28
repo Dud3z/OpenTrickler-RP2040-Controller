@@ -78,6 +78,12 @@
                     <!-- AI Trickle state: phase while charging, mode otherwise -->
                     <div id="aiStatusLine" class="text-sm text-center opacity-80" style="display: none;"></div>
 
+                    <!-- Recipe: profile and charge weight in one step (Settings - Recipes) -->
+                    <select id="recipeSelect" class="select select-bordered" onchange="onRecipeSelected(this)" style="display: none;">
+                        <option value="-1">No recipe</option>
+                    </select>
+                    <div id="recipeNote" class="text-sm text-center opacity-80" style="display: none;"></div>
+
                     <!-- Row 3 -->
                     <input id="chargeWeightInput" type="number" step="0.001" placeholder="Charge Weight" class="input input-bordered input-primary" pattern="[0-9]+([\.,][0-9]+)?"/>
 
@@ -85,7 +91,7 @@
                     <div class="grid grid-cols-3 gap-2">
                         <button id="confirmButton" class="btn btn-primary btn-lg" onclick="setChargeWeight()">Start</button>
                         <!-- Tap: one small turn of the fine trickler, after a charge while the cup is still on the scale -->
-                        <button id="tapButton" class="btn btn-secondary btn-lg" onclick="tapFineTrickler()" disabled="disabled" title="Turn the fine trickler by the tap angle (Settings - AI Trickle)">Tap</button>
+                        <button id="tapButton" class="btn btn-secondary btn-lg" onclick="tapFineTrickler()" disabled="disabled" title="Turn the fine trickler by the tap angle (Settings - Charging)">Tap</button>
                         <button id="stopButton" class="btn btn-warning btn-lg" onclick="enterChargeMode(false)" disabled="disabled">Stop</button>
                     </div>
                 </div>
@@ -101,6 +107,24 @@
                     </div>
                 </div>
             </section>
+
+            <!-- Statistics of the charges since the session started -->
+            <div class="grid grid-cols-1 gap-2 px-4">
+                <div class="divider">Session</div>
+                <div id="sessionSummary" class="text-sm">No charges yet.</div>
+                <div class="overflow-x-auto">
+                    <table class="table table-xs">
+                        <thead>
+                            <tr><th>Load</th><th>n</th><th>Mean</th><th>SD</th><th>ES</th><th>In tol.</th><th>Time</th></tr>
+                        </thead>
+                        <tbody id="sessionGroups"></tbody>
+                    </table>
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <button class="btn btn-neutral" onclick="downloadSessionCsv()">Export CSV</button>
+                    <button class="btn btn-neutral" onclick="startNewSession()">New Session</button>
+                </div>
+            </div>
 
             <div class="grid grid-cols-1 gap-2 px-4">
                 <div class="divider">Scale Control</div>
@@ -158,8 +182,297 @@
                 </div>
 
                 <div class="grid grid-cols-1 px-6 gap-2">
-                    <!-- Scale Settings -->
-                    <section class="settings-page" id="settings-scale" name="Scale">
+                    <!-- Charging -->
+                    <section class="settings-page" id="settings-charge-mode" name="Charging" style="display: none;">
+                        <form id="chargeControllerForm" action="/rest/ai_config" class="grid grid-cols-1 gap-3">
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Controller</span>
+                                <select class="select select-bordered" name="a0">
+                                    <option value="true">AI Trickle (learns per profile)</option>
+                                    <option value="false">Classic PID</option>
+                                </select>
+                                <span class="text-sm opacity-80">AI Trickle plans every charge from what it learned about the powder. Classic PID uses the Kp/Ki/Kd values of the profile and the stop thresholds below. The tolerance is set per profile under Profiles.</span>
+                            </div>
+                        </form>
+
+                        <form id="chargeModeConfigForm" action="/rest/charge_mode_config" class="grid grid-cols-1 gap-3 mt-3">
+                            <div class="grid grid-cols-1 gap-1 requires-pid">
+                                <span class="label-text">Coarse Trickler Stop Threshold</span>
+                                <input type="number" class="input input-bordered" name="c5" step="0.001">
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1 requires-pid">
+                                <span class="label-text">Fine Trickler Stop Threshold</span>
+                                <input type="number" class="input input-bordered" name="c6" step="0.001">
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Set Point Accuracy (Standard Deviation)</span>
+                                <input type="number" class="input input-bordered" name="c7" step="0.001">
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Set Point Accuracy (Mean)</span>
+                                <input type="number" class="input input-bordered" name="c8" step="0.001">
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Decimal Places</span>
+                                <select class="select select-bordered" name="c9">
+                                    <option value="0">2</option>
+                                    <option value="1">3</option>
+                                </select>
+                            </div>
+
+                            <div class="divider">After the Stop</div>
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Coarse Stop Backoff Enable</span>
+                                <select class="select select-bordered" name="c14">
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Coarse Stop Backoff Size (turns)</span>
+                                <select class="select select-bordered" name="c15">
+                                    <option value="0.125">1/8</option>
+                                    <option value="0.25">1/4</option>
+                                    <option value="0.5">1/2</option>
+                                    <option value="1.0">1</option>
+                                </select>
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Coarse Stop Backoff Speed (rps)</span>
+                                <input type="number" class="input input-bordered" name="c16" step="0.001" min="0">
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Fine Tube Reverse After Each Stop</span>
+                                <select class="select select-bordered" name="c17">
+                                    <option value="auto">Auto (learned per profile)</option>
+                                    <option value="off">Off</option>
+                                    <option value="0.01">0.01 rev</option>
+                                    <option value="0.02">0.02 rev</option>
+                                    <option value="0.03">0.03 rev</option>
+                                    <option value="0.04">0.04 rev</option>
+                                    <option value="0.05">0.05 rev</option>
+                                    <option value="0.06">0.06 rev</option>
+                                    <option value="0.08">0.08 rev</option>
+                                    <option value="0.10">0.10 rev</option>
+                                    <option value="0.15">0.15 rev</option>
+                                    <option value="0.20">0.20 rev</option>
+                                    <option value="0.30">0.30 rev</option>
+                                </select>
+                                <span class="text-sm opacity-80">Pulls kernels on the tube lip back in so they do not dribble into the pan while the scale settles. Too much throws kernels out instead. Works in both charge modes. With AI Trickle, Auto tries 0, 0.02 and 0.05 rev per profile and keeps the one with the least dribble (shown under AI Trickle); without AI Trickle, Auto uses 0.02 rev.</span>
+                            </div>
+
+                            <div class="divider requires-servo-gate">Servo Gate Sequence</div>
+                            <div class="grid grid-cols-1 gap-1 requires-servo-gate">
+                                <span class="label-text">Enable Pre-Charge (requires servo gate)</span>
+                                <select class="select select-bordered" name="c10">
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1 requires-servo-gate">
+                                <span class="label-text">Pre-Charge Duration (ms)</span>
+                                <input type="number" class="input input-bordered" name="c11" step="1">
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1 requires-servo-gate">
+                                <span class="label-text">Pre-Charge Speed (rps)</span>
+                                <input type="number" class="input input-bordered" name="c12" step="0.001">
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1 requires-servo-gate">
+                                <span class="label-text">Mid-stage Servo Gate Position (0=open, 1=close)</span>
+                                <input type="number" class="input input-bordered" name="c13" step="0.001" min="0" max="1">
+                            </div>
+                        </form>
+
+                        <form id="chargeTapForm" action="/rest/ai_config" class="grid grid-cols-1 gap-3 mt-3">
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Tap Angle of the Fine Trickler (degrees)</span>
+                                <input type="number" class="input input-bordered" name="a7" step="1" min="1" max="180">
+                                <span id="aiTapInfo" class="text-sm opacity-80"></span>
+                            </div>
+                        </form>
+                        <button class="btn btn-neutral page-apply-btn">Apply</button>
+                    </section>
+                    <section class="settings-page" id="settings-recipes" name="Recipes" style="display: none;">
+                        <div class="grid grid-cols-1 gap-3">
+                            <span class="label-text text-sm opacity-80">A recipe holds the charge weight and the powder profile of a load. Choosing it on the Trickler page or on the display (Recipes) selects both in one step, so the right powder profile is always used.</span>
+                            <div id="recipeList" class="grid grid-cols-1 gap-2"></div>
+                            <button class="btn btn-primary" onclick="openRecipeDialog(-1)">New Recipe</button>
+                        </div>
+                    </section>
+
+                    <!-- Powder -->
+                    <section class="settings-page" id="settings-profile" name="Profiles" style="display: none;">
+                        <form id="profileConfigForm" action="/rest/profile_config" class="grid grid-cols-1 gap-3">
+                            <div class="grid grid-cols-1 gap-2">
+                                <div role="alert" class="alert">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        class="h-6 w-6 shrink-0 stroke-current">
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z">
+                                        </path>
+                                    </svg>
+                                    <a href="https://github.com/eamars/OpenTrickler/blob/main/Manual/tuning_guide.md" class="link">Powder Profile Tuning Guide</a>
+                                </div>
+                                <div id="profileSpeedWarning" role="alert" class="alert alert-warning text-sm" style="display: none;">This is a free profile slot. Use New Profile to create a profile with a name, it takes over working settings. A free slot can be overwritten by New Profile.</div>
+                                <span class="label-text text-sm opacity-80">The min/max flow speeds are used by both controllers, the max speeds limit the charge time the most. Choosing a profile here selects it for charging.</span>
+
+                                <span class="label-text">Select Profile</span>
+                                <select class="select select-bordered select-primary" name="pf" onchange="populateProfileSelection(this)" id="select_profile_option">
+                                    <option value="0">#0</option>
+                                    <option value="1">#1</option>
+                                    <option value="2">#2</option>
+                                    <option value="3">#3</option>
+                                    <option value="4">#4</option>
+                                    <option value="5">#5</option>
+                                    <option value="6">#6</option>
+                                    <option value="7">#7</option>
+                                </select>
+
+                                <div class="grid grid-cols-2 gap-2">
+                                    <button class="btn btn-neutral system-control-export-btn" onclick="onExportProfileBtnClicked(event)">Export Profile</button>
+                                    <button class="btn btn-neutral" onclick="onNewProfileClicked(event)">New Profile</button>
+                                </div>
+                            </div>
+
+                            <div class="divider"></div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Profile Name</span>
+                                <input type="text" class="input input-bordered" name="p2" maxlength="16">
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1 requires-pid">
+                                <span class="label-text">Coarse Trickler Kp</span>
+                                <input type="number" class="input input-bordered" name="p3" step="0.001">
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1 requires-pid">
+                                <span class="label-text">Coarse Trickler Ki</span>
+                                <input type="number" class="input input-bordered" name="p4" step="0.001">
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1 requires-pid">
+                                <span class="label-text">Coarse Trickler Kd</span>
+                                <input type="number" class="input input-bordered" name="p5" step="0.001">
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Coarse Trickler Min Flow Speed (rps)</span>
+                                <input type="number" class="input input-bordered" name="p6" step="0.001">
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Coarse Trickler Max Flow Speed (rps)</span>
+                                <input type="number" class="input input-bordered" name="p7" step="0.001">
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1 requires-pid">
+                                <span class="label-text">Fine Trickler Kp</span>
+                                <input type="number" class="input input-bordered" name="p8" step="0.001">
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1 requires-pid">
+                                <span class="label-text">Fine Trickler Ki</span>
+                                <input type="number" class="input input-bordered" name="p9" step="0.001">
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1 requires-pid">
+                                <span class="label-text">Fine Trickler Kd</span>
+                                <input type="number" class="input input-bordered" name="p10" step="0.001">
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Fine Trickler Min Flow Speed (rps)</span>
+                                <input type="number" class="input input-bordered" name="p11" step="0.001">
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Fine Trickler Max Flow Speed (rps)</span>
+                                <input type="number" class="input input-bordered" name="p12" step="0.001">
+                            </div>
+                        </form>
+
+                        <form id="profileAiForm" action="/rest/ai_config" class="grid grid-cols-1 gap-3 mt-3">
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Tolerance (gr)</span>
+                                <input type="number" class="input input-bordered" name="a5" step="0.01" min="0.01" max="0.5">
+                            </div>
+                            <div class="grid grid-cols-1 gap-1 requires-ai">
+                                <span class="label-text">Learned by AI Trickle</span>
+                                <div id="aiProfileInfo" class="text-sm"></div>
+                            </div>
+                        </form>
+                        <button class="btn btn-neutral page-apply-btn">Apply</button>
+                    </section>
+
+                    <!-- AI -->
+                    <section class="settings-page" id="settings-ai-trickle" name="AI Trickle" style="display: none;">
+                        <form id="aiTrickleConfigForm" action="/rest/ai_config" class="grid grid-cols-1 gap-3">
+                            <span class="label-text text-sm opacity-80">Adaptive controller that learns how the powder behaves per profile and plans every charge. Learning sessions, history and the assistant are on the <a class="link" href="/ai">AI page</a>.</span>
+                            <div id="aiOffNotice" role="alert" class="alert alert-warning text-sm" style="display: none;">The controller is set to Classic PID. Switch it under <a class="link" onclick="onSettingsLinkClicked('settings-charge-mode')">Charging</a>.</div>
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Auto Speed (tuned per profile)</span>
+                                <select class="select select-bordered" name="a4">
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Speed, 0 = careful ... 100 = fast (start value with Auto Speed)</span>
+                                <input type="number" class="input input-bordered" name="a1" step="5" min="0" max="100">
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Speed in Use for the Current Profile</span>
+                                <input type="text" class="input input-bordered" name="sp" disabled="disabled" readonly>
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Fine Tube Reverse (learned by Auto)</span>
+                                <span id="aiReverseInfo" class="text-sm opacity-80"></span>
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Speed Limits in Use (profile and motor settings combined)</span>
+                                <div id="aiLimitsInfo" class="text-sm"></div>
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Keep Learning During Normal Charges</span>
+                                <select class="select select-bordered" name="a2">
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Throws per Learning Session</span>
+                                <input type="number" class="input input-bordered" name="a3" step="1" min="2" max="20">
+                            </div>
+                        </form>
+                        <button class="btn btn-neutral page-apply-btn">Apply</button>
+                    </section>
+
+                    <!-- Hardware -->
+                    <section class="settings-page" id="settings-scale" name="Scale" style="display: none;">
+
                         <form id="scaleConfigForm" action="/rest/scale_config" class="grid grid-cols-1 gap-3">
                             <div class="grid grid-cols-1 gap-1">
                                 <span class="label-text">Scale Driver</span>
@@ -194,8 +507,8 @@
                                 </select>
                             </div>
 
-                            <button class="btn btn-neutral settings-apply-btn">Apply</button>
                         </form>
+                        <button class="btn btn-neutral page-apply-btn mt-3">Apply</button>
 
                         <div class="divider">Scale Diagnostics</div>
                         <div class="grid grid-cols-1 gap-3">
@@ -213,351 +526,8 @@
                             <ul id="diagVerdict" class="text-sm list-disc pl-5"></ul>
                         </div>
                     </section>
-
-                    <!-- Profile Settings -->
-                    <section class="settings-page" id="settings-profile" name="Profiles" style="display: none;">
-                        <form id="profileConfigForm" action="/rest/profile_config" class="grid grid-cols-1 gap-3">
-                            <div class="grid grid-cols-1 gap-2">
-                                <div role="alert" class="alert">
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        class="h-6 w-6 shrink-0 stroke-current">
-                                        <path
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                            stroke-width="2"
-                                            d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z">
-                                        </path>
-                                    </svg>
-                                    <a href="https://github.com/eamars/OpenTrickler/blob/main/Manual/tuning_guide.md" class="link">Powder Profile Tuning Guide</a>
-                                </div>
-                                <div id="profileSpeedWarning" role="alert" class="alert alert-warning text-sm" style="display: none;">This is a free profile slot. Use New Profile to create a profile with a name, it takes over working settings. A free slot can be overwritten by New Profile.</div>
-                                <span class="label-text text-sm opacity-80">With AI Trickle enabled, the Kp/Ki/Kd values are not used. The min/max flow speeds are used by both controllers, the max speeds limit the charge time the most.</span>
-
-                                <span class="label-text">Select Profile</span>
-                                <select class="select select-bordered select-primary" name="pf" onchange="populateProfileSelection(this)" id="select_profile_option">
-                                    <option value="0">#0</option>
-                                    <option value="1">#1</option>
-                                    <option value="2">#2</option>
-                                    <option value="3">#3</option>
-                                    <option value="4">#4</option>
-                                    <option value="5">#5</option>
-                                    <option value="6">#6</option>
-                                    <option value="7">#7</option>
-                                </select>
-
-                                <div class="grid grid-cols-2 gap-2">
-                                    <button class="btn btn-neutral system-control-export-btn" onclick="onExportProfileBtnClicked(event)">Export Profile</button>
-                                    <button class="btn btn-neutral" onclick="onNewProfileClicked(event)">New Profile</button>
-                                </div>
-                            </div>
-
-                            <div class="divider"></div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Profile Name</span>
-                                <input type="text" class="input input-bordered" name="p2" maxlength="16">
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Coarse Trickler Kp (classic PID only)</span>
-                                <input type="number" class="input input-bordered" name="p3" step="0.001">
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Coarse Trickler Ki (classic PID only)</span>
-                                <input type="number" class="input input-bordered" name="p4" step="0.001">
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Coarse Trickler Kd (classic PID only)</span>
-                                <input type="number" class="input input-bordered" name="p5" step="0.001">
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Coarse Trickler Min Flow Speed (rps)</span>
-                                <input type="number" class="input input-bordered" name="p6" step="0.001">
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Coarse Trickler Max Flow Speed (rps)</span>
-                                <input type="number" class="input input-bordered" name="p7" step="0.001">
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Fine Trickler Kp (classic PID only)</span>
-                                <input type="number" class="input input-bordered" name="p8" step="0.001">
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Fine Trickler Ki (classic PID only)</span>
-                                <input type="number" class="input input-bordered" name="p9" step="0.001">
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Fine Trickler Kd (classic PID only)</span>
-                                <input type="number" class="input input-bordered" name="p10" step="0.001">
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Fine Trickler Min Flow Speed (rps)</span>
-                                <input type="number" class="input input-bordered" name="p11" step="0.001">
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Fine Trickler Max Flow Speed (rps)</span>
-                                <input type="number" class="input input-bordered" name="p12" step="0.001">
-                            </div>
-
-                            <button class="btn btn-neutral settings-apply-btn">Apply</button>
-                        </form>
-                    </section>
-
-                    <!-- Charge Mode Settings -->
-                    <section class="settings-page" id="settings-charge-mode" name="Charge Mode" style="display: none;">
-                        <form id="chargeModeConfigForm" action="/rest/charge_mode_config" class="grid grid-cols-1 gap-3">
-                            <span class="label-text text-sm opacity-80">With AI Trickle enabled, the coarse/fine stop thresholds are not used and the tolerance is set under AI Trickle. Colours, backoff, precharge, decimal places and the zero check apply to both controllers.</span>
-                            <div class="grid grid-cols-2 gap-1">
-                                <span class="label-text">Neopixel LED Normal Charge Colour</span>
-                                <input type="color" class="input w-full" name="c1">
-                            </div>
-
-                            <div class="grid grid-cols-2 gap-1">
-                                <span class="label-text">Neopixel LED Under Charge Colour</span>
-                                <input type="color" class="input w-full" name="c2">
-                            </div>
-
-                            <div class="grid grid-cols-2 gap-1">
-                                <span class="label-text">Neopixel LED Over Charge Colour</span>
-                                <input type="color" class="input w-full" name="c3">
-                            </div>
-
-                            <div class="grid grid-cols-2 gap-1">
-                                <span class="label-text">Neopixel LED Not Ready Colour</span>
-                                <input type="color" class="input w-full" name="c4">
-                            </div>
-
-                            <div class="divider"></div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Coarse Trickler Stop Threshold (classic PID only)</span>
-                                <input type="number" class="input input-bordered" name="c5" step="0.001">
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Fine Trickler Stop Threshold (classic PID only)</span>
-                                <input type="number" class="input input-bordered" name="c6" step="0.001">
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Set Point Accuracy (Standard Deviation)</span>
-                                <input type="number" class="input input-bordered" name="c7" step="0.001">
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Set Point Accuracy (Mean)</span>
-                                <input type="number" class="input input-bordered" name="c8" step="0.001">
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Decimal Places</span>
-                                <select class="select select-bordered" name="c9">
-                                    <option value="0">2</option>
-                                    <option value="1">3</option>
-                                </select>
-                            </div>
-
-                            <div class="divider"></div>
-
-                            <div class="grid grid-cols-1 gap-1 requires-servo-gate">
-                                <span class="label-text">Enable Pre-Charge (requires servo gate)</span>
-                                <select class="select select-bordered" name="c10">
-                                    <option value="true">Yes</option>
-                                    <option value="false">No</option>
-                                </select>
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1 requires-servo-gate">
-                                <span class="label-text">Pre-Charge Duration (ms)</span>
-                                <input type="number" class="input input-bordered" name="c11" step="1">
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1 requires-servo-gate">
-                                <span class="label-text">Pre-Charge Speed (rps)</span>
-                                <input type="number" class="input input-bordered" name="c12" step="0.001">
-                            </div>
-							<div class="grid grid-cols-1 gap-1 requires-servo-gate">
-                                <span class="label-text">Mid-stage Servo Gate Position (0=open, 1=close)</span>
-                                <input type="number" class="input input-bordered" name="c13" step="0.001" min="0" max="1">
-                            </div>
-
-                            <div class="divider"></div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Coarse Stop Backoff Enable</span>
-                                <select class="select select-bordered" name="c14">
-                                    <option value="true">Yes</option>
-                                    <option value="false">No</option>
-                                </select>
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Coarse Stop Backoff Size (turns)</span>
-                                <select class="select select-bordered" name="c15">
-                                    <option value="0.125">1/8</option>
-                                    <option value="0.25">1/4</option>
-                                    <option value="0.5">1/2</option>
-                                    <option value="1.0">1</option>
-                                </select>
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Coarse Stop Backoff Speed (rps)</span>
-                                <input type="number" class="input input-bordered" name="c16" step="0.001" min="0">
-                            </div>
-
-                            <div class="divider"></div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Fine Tube Reverse After Each Stop</span>
-                                <select class="select select-bordered" name="c17">
-                                    <option value="auto">Auto (learned per profile)</option>
-                                    <option value="off">Off</option>
-                                    <option value="0.01">0.01 rev</option>
-                                    <option value="0.02">0.02 rev</option>
-                                    <option value="0.03">0.03 rev</option>
-                                    <option value="0.04">0.04 rev</option>
-                                    <option value="0.05">0.05 rev</option>
-                                    <option value="0.06">0.06 rev</option>
-                                    <option value="0.08">0.08 rev</option>
-                                    <option value="0.10">0.10 rev</option>
-                                    <option value="0.15">0.15 rev</option>
-                                    <option value="0.20">0.20 rev</option>
-                                    <option value="0.30">0.30 rev</option>
-                                </select>
-                                <span class="text-sm opacity-80">Pulls kernels on the tube lip back in so they do not dribble into the pan while the scale settles. Too much throws kernels out instead. Works in both charge modes. With AI Trickle, Auto tries 0, 0.02 and 0.05 rev per profile and keeps the one with the least dribble (shown under AI Trickle); without AI Trickle, Auto uses 0.02 rev.</span>
-                            </div>
-
-                            <button class="btn btn-neutral settings-apply-btn">Apply</button>
-                        </form>
-                    </section>
-
-                    <!-- Wireless Settings -->
-                    <!-- AI Trickle Settings -->
-                    <section class="settings-page" id="settings-ai-trickle" name="AI Trickle" style="display: none;">
-                        <form id="aiTrickleConfigForm" action="/rest/ai_config" class="grid grid-cols-1 gap-3">
-                            <span class="label-text text-sm opacity-80">Adaptive controller that learns how the powder behaves per profile and plans every charge. Learning sessions, history and the assistant are on the <a class="link" href="/ai">AI page</a>.</span>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">AI Trickle Enable</span>
-                                <select class="select select-bordered" name="a0">
-                                    <option value="true">Yes</option>
-                                    <option value="false">No (classic PID)</option>
-                                </select>
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Tolerance (gr) of the current profile</span>
-                                <input type="number" class="input input-bordered" name="a5" step="0.01" min="0.01" max="0.5">
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Auto Speed (tuned per profile)</span>
-                                <select class="select select-bordered" name="a4">
-                                    <option value="true">Yes</option>
-                                    <option value="false">No</option>
-                                </select>
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Speed, 0 = careful ... 100 = fast (start value with Auto Speed)</span>
-                                <input type="number" class="input input-bordered" name="a1" step="5" min="0" max="100">
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Speed in Use for the Current Profile</span>
-                                <input type="text" class="input input-bordered" name="sp" disabled="disabled" readonly>
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Fine Tube Reverse (learned by Auto)</span>
-                                <span id="aiReverseInfo" class="text-sm opacity-80"></span>
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Tap Angle of the Fine Trickler (degrees)</span>
-                                <input type="number" class="input input-bordered" name="a7" step="1" min="1" max="180">
-                                <span id="aiTapInfo" class="text-sm opacity-80"></span>
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Speed Limits in Use (profile and motor settings combined)</span>
-                                <div id="aiLimitsInfo" class="text-sm"></div>
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Keep Learning During Normal Charges</span>
-                                <select class="select select-bordered" name="a2">
-                                    <option value="true">Yes</option>
-                                    <option value="false">No</option>
-                                </select>
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Throws per Learning Session</span>
-                                <input type="number" class="input input-bordered" name="a3" step="1" min="2" max="20">
-                            </div>
-
-                            <button class="btn btn-neutral settings-apply-btn">Apply</button>
-                        </form>
-                    </section>
-
-                    <section class="settings-page" id="settings-wireless" name="Wireless" style="display: none;">
-                        <form id="wirelessConfigForm" action="/rest/wireless_config" class="grid grid-cols-1 gap-3">
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">WiFi SSID</span>
-                                <input type="text" class="input input-bordered" name="w0" maxlength="32">
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <div>
-                                    <div class="badge badge-neutral">Write Only</div>
-                                    <span class="label-text">WiFi Password</span> 
-                                </div>
-                                <input type="password" class="input input-bordered" name="w1" maxlength="63" placeholder="********">
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">WiFi Authentication Method</span>
-                                <select class="select select-bordered" name="w2">
-                                    <option value="0">None</option>
-                                    <option value="1">WPA-TKIP</option>
-                                    <option value="2">WPA2-AES</option>
-                                    <option value="3">WPA2-MIXED</option>
-                                </select>
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">WiFi Attempt to Connect Timeout (ms)</span>
-                                <input type="number" class="input input-bordered" name="w3" step="1000">
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Enable WiFi</span>
-                                <select class="select select-bordered" name="w4">
-                                    <option value="true">Yes</option>
-                                    <option value="false">No</option>
-                                </select>
-                            </div>
-
-                            <button class="btn btn-neutral settings-apply-btn">Apply</button>
-                        </form>
-                    </section>
-
-                    <!-- Coarse Trickler Motor Settings -->
-                    <section class="settings-page" id="settings-coarse-motor" name="Coarse Trickler Motor" style="display: none;">
+                    <section class="settings-page" id="settings-motors" name="Motors" style="display: none;">
+                        <div class="divider">Coarse Trickler</div>
                         <form id="coarseMotorConfigForm" action="/rest/coarse_motor_config" class="grid grid-cols-1 gap-3">
                             <div class="grid grid-cols-1 gap-1">
                                 <span class="label-text">Angular Acceleration (rps/s)</span>
@@ -623,13 +593,8 @@
                                     <option value="false">No</option>
                                 </select>
                             </div>
-
-                            <button class="btn btn-neutral settings-apply-btn">Apply</button>
-                        </form> 
-                    </section>
-
-                    <!-- Fine Trickler motor Settings -->
-                    <section class="settings-page" id="settings-fine-motor" name="Fine Trickler Motor" style="display: none;">
+                        </form>
+                        <div class="divider">Fine Trickler</div>
                         <form id="fineMotorConfigForm" action="/rest/fine_motor_config" class="grid grid-cols-1 gap-3">
                             <div class="grid grid-cols-1 gap-1">
                                 <span class="label-text">Angular Acceleration (rps/s)</span>
@@ -695,17 +660,75 @@
                                     <option value="false">No</option>
                                 </select>
                             </div>
-
-                            <button class="btn btn-neutral settings-apply-btn">Apply</button>
-                        </form> 
+                        </form>
+                        <button class="btn btn-neutral page-apply-btn">Apply</button>
                     </section>
+                    <section class="settings-page" id="settings-servo-gate" name="Servo Gate" style="display: none;">
+                        <form id="servoGateConfigForm" action="/rest/servo_gate_config" class="grid grid-cols-1 gap-3">
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Servo Gate Enable</span>
+                                <select class="select select-bordered" name="c0">
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                            </div>
 
-                    <!-- Neopxiel LED Settings -->
-                    <section class="settings-page" id="settings-neopixel-led" name="Neopixel LED" style="display: none;">
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Shutter 0 Close Duty Cycle</span>
+                                <input type="number" class="input input-bordered" name="c1" step="0.001">
+                            </div>
+                            
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Shutter 0 Open Duty Cycle</span>
+                                <input type="number" class="input input-bordered" name="c2" step="0.001">
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Shutter 1 Close Duty Cycle</span>
+                                <input type="number" class="input input-bordered" name="c3" step="0.001">
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Shutter 1 Open Duty Cycle</span>
+                                <input type="number" class="input input-bordered" name="c4" step="0.001">
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Shutter Close Speed (%/s)</span>
+                                <input type="number" class="input input-bordered" name="c5" step="0.001">
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Shutter Open Speed (%/s)</span>
+                                <input type="number" class="input input-bordered" name="c6" step="0.001">
+                            </div>
+                        </form>
+                        <button class="btn btn-neutral page-apply-btn">Apply</button>
+                    </section>
+                    <section class="settings-page" id="settings-display" name="Display & LEDs" style="display: none;">
+                        <div class="divider">Mini 12864 Display</div>
+                        <form id="mini12864ModuleConfigForm" action="/rest/mini_12864_config" class="grid grid-cols-1 gap-3">
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Inverted Rotary Button Direction</span>
+                                <select class="select select-bordered" name="b0">
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Display Rotation (deg)</span>
+                                <select class="select select-bordered" name="b1">
+                                    <option value="0">0</option>
+                                    <option value="2">180</option>
+                                </select>
+                            </div>
+                        </form>
+                        <div class="divider">Neopixel LEDs</div>
                         <form id="neopixelLedConfigForm" action="/rest/neopixel_led_config" class="grid grid-cols-1 gap-3">
                             <div role="alert" class="alert">
                                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                                <span>The default Neopxiel LED colour can be overridden by Charge Mode Functions.</span>
+                                <span>The charge colours below override the default colours while charging.</span>
                             </div>
 
                             <div class="grid grid-cols-2 gap-1">
@@ -762,80 +785,75 @@
                                     <option value="1">GRB</option>
                                 </select>
                             </div>
-
-                            <button class="btn btn-neutral settings-apply-btn">Apply</button>
                         </form>
+                        <div class="divider">Charge Colours</div>
+                        <form id="chargeColoursForm" action="/rest/charge_mode_config" class="grid grid-cols-1 gap-3">
+                            <div class="grid grid-cols-2 gap-1">
+                                <span class="label-text">Normal Charge Colour</span>
+                                <input type="color" class="input w-full" name="c1">
+                            </div>
+
+                            <div class="grid grid-cols-2 gap-1">
+                                <span class="label-text">Under Charge Colour</span>
+                                <input type="color" class="input w-full" name="c2">
+                            </div>
+
+                            <div class="grid grid-cols-2 gap-1">
+                                <span class="label-text">Over Charge Colour</span>
+                                <input type="color" class="input w-full" name="c3">
+                            </div>
+
+                            <div class="grid grid-cols-2 gap-1">
+                                <span class="label-text">Not Ready Colour</span>
+                                <input type="color" class="input w-full" name="c4">
+                            </div>
+                        </form>
+                        <button class="btn btn-neutral page-apply-btn">Apply</button>
                     </section>
 
-                    <!-- Mini 12864 Module Settings -->
-                    <section class="settings-page" id="settings-mini-12864-module" name="Mini 12864 Module" style="display: none;">
-                        <form id="mini12864ModuleConfigForm" action="/rest/mini_12864_config" class="grid grid-cols-1 gap-3">
+                    <!-- System -->
+                    <section class="settings-page" id="settings-wireless" name="Wireless" style="display: none;">
+                        <form id="wirelessConfigForm" action="/rest/wireless_config" class="grid grid-cols-1 gap-3">
                             <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Inverted Rotary Button Direction</span>
-                                <select class="select select-bordered" name="b0">
+                                <span class="label-text">WiFi SSID</span>
+                                <input type="text" class="input input-bordered" name="w0" maxlength="32">
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <div>
+                                    <div class="badge badge-neutral">Write Only</div>
+                                    <span class="label-text">WiFi Password</span> 
+                                </div>
+                                <input type="password" class="input input-bordered" name="w1" maxlength="63" placeholder="********">
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">WiFi Authentication Method</span>
+                                <select class="select select-bordered" name="w2">
+                                    <option value="0">None</option>
+                                    <option value="1">WPA-TKIP</option>
+                                    <option value="2">WPA2-AES</option>
+                                    <option value="3">WPA2-MIXED</option>
+                                </select>
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">WiFi Attempt to Connect Timeout (ms)</span>
+                                <input type="number" class="input input-bordered" name="w3" step="1000">
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Enable WiFi</span>
+                                <select class="select select-bordered" name="w4">
                                     <option value="true">Yes</option>
                                     <option value="false">No</option>
                                 </select>
                             </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Display Rotation (deg)</span>
-                                <select class="select select-bordered" name="b1">
-                                    <option value="0">0</option>
-                                    <option value="2">180</option>
-                                </select>
-                            </div>
-
-                            <button class="btn btn-neutral settings-apply-btn">Apply</button>
                         </form>
+                        <button class="btn btn-neutral page-apply-btn">Apply</button>
                     </section>
+                    <section class="settings-page" id="settings-system-control" name="System" style="display: none;">
 
-                    <section class="settings-page" id="settings-servo-gate" name="Servo Gate" style="display: none;">
-                        <form id="servoGateConfigForm" action="/rest/servo_gate_config" class="grid grid-cols-1 gap-3">
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Servo Gate Enable</span>
-                                <select class="select select-bordered" name="c0">
-                                    <option value="true">Yes</option>
-                                    <option value="false">No</option>
-                                </select>
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Shutter 0 Close Duty Cycle</span>
-                                <input type="number" class="input input-bordered" name="c1" step="0.001">
-                            </div>
-                            
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Shutter 0 Open Duty Cycle</span>
-                                <input type="number" class="input input-bordered" name="c2" step="0.001">
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Shutter 1 Close Duty Cycle</span>
-                                <input type="number" class="input input-bordered" name="c3" step="0.001">
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Shutter 1 Open Duty Cycle</span>
-                                <input type="number" class="input input-bordered" name="c4" step="0.001">
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Shutter Close Speed (%/s)</span>
-                                <input type="number" class="input input-bordered" name="c5" step="0.001">
-                            </div>
-
-                            <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Shutter Open Speed (%/s)</span>
-                                <input type="number" class="input input-bordered" name="c6" step="0.001">
-                            </div>
-
-                            <button class="btn btn-neutral settings-apply-btn">Apply</button>
-                        </form>
-                    </section>
-
-                    <!-- System Control Page -->
-                    <section class="settings-page" id="settings-system-control" name="System Control" style="display: none;">
                         <form id="systemControlForm" action="/rest/system_control" class="grid grid-cols-1 gap-3">
                             <div class="grid grid-cols-1 gap-1">
                                 <span class="label-text">Unique ID</span>
@@ -890,15 +908,17 @@
                             <button class="btn btn-neutral system-control-apply-btn" id="system_control_apply_btn">Apply</button>
                         </form>
 
-                        <div class="divider"></div>
-
+                        <div class="divider">Backup</div>
                         <!-- Export and Import config -->
                         <div class="grid grid-cols-2 gap-1">
                             <button class="btn btn-neutral system-control-export-btn" onclick="onExportConfigClicked()">Export Config</button>
                             <button class="btn btn-neutral system-control-import-btn" onclick="onImportConfigClicked()">Import Config</button>
                         </div>
 
-                        <div class="divider">Firmware Update</div>
+                        <div class="divider">Statistics</div>
+                        <span class="label-text text-sm opacity-80">The session statistics and the CSV export of all charges are on the Trickler page.</span>
+                    </section>
+                    <section class="settings-page" id="settings-firmware" name="Firmware Update" style="display: none;">
                         <div class="grid grid-cols-1 gap-3">
                             <div id="fwInstalled" class="grid grid-cols-2 gap-1 text-sm"></div>
                             <div id="fwSetup" role="alert" class="alert text-sm hidden"></div>
@@ -919,26 +939,29 @@
                             <button id="fwInstallButton" class="btn btn-primary hidden" onclick="fwInstallUpdate()">Install</button>
                             <button id="fwApplyButton" class="btn btn-warning hidden" onclick="fwApplyUpdate()">Restart &amp; Activate</button>
                         </div>
-
                     </section>
 
                 </div>
             </div> 
             <div class="drawer-side exclude-bottom-nav">
                 <label id="closeDrawerSide" for="settingsDrawer" aria-label="close sidebar" class="drawer-overlay"></label> 
-                <ul id=drawerSlide" class="menu p-2 w-60 min-h-full bg-base-200">
-                    <!-- Sidebar content here -->
-                    <li><a class="text-lg" onclick="onSettingsLinkClicked('settings-scale')">Scale</a></li>
+                <ul id="drawerSlide" class="menu p-2 w-60 min-h-full bg-base-200">
+                    <li class="menu-title">Charging</li>
+                    <li><a class="text-lg" onclick="onSettingsLinkClicked('settings-charge-mode')">Charging</a></li>
+                    <li><a class="text-lg" onclick="onSettingsLinkClicked('settings-recipes')">Recipes</a></li>
+                    <li class="menu-title">Powder</li>
                     <li><a class="text-lg" onclick="onSettingsLinkClicked('settings-profile')">Profiles</a></li>
-                    <li><a class="text-lg" onclick="onSettingsLinkClicked('settings-charge-mode')">Charge Mode</a></li>
+                    <li class="menu-title">AI</li>
                     <li><a class="text-lg" onclick="onSettingsLinkClicked('settings-ai-trickle')">AI Trickle</a></li>
-                    <li><a class="text-lg" onclick="onSettingsLinkClicked('settings-wireless')">Wireless</a></li>
-                    <li><a class="text-lg" onclick="onSettingsLinkClicked('settings-coarse-motor')">Coarse Motor</a></li>
-                    <li><a class="text-lg" onclick="onSettingsLinkClicked('settings-fine-motor')">Fine Motor</a></li>
-                    <li><a class="text-lg" onclick="onSettingsLinkClicked('settings-neopixel-led')">Neopixel LED</a></li>
-                    <li><a class="text-lg" onclick="onSettingsLinkClicked('settings-mini-12864-module')">Mini 12864 Module</a></li>
+                    <li class="menu-title">Hardware</li>
+                    <li><a class="text-lg" onclick="onSettingsLinkClicked('settings-scale')">Scale</a></li>
+                    <li><a class="text-lg" onclick="onSettingsLinkClicked('settings-motors')">Motors</a></li>
                     <li><a class="text-lg" onclick="onSettingsLinkClicked('settings-servo-gate')">Servo Gate</a></li>
-                    <li><a class="text-lg" onclick="onSettingsLinkClicked('settings-system-control')">System Control</a></li>
+                    <li><a class="text-lg" onclick="onSettingsLinkClicked('settings-display')">Display &amp; LEDs</a></li>
+                    <li class="menu-title">System</li>
+                    <li><a class="text-lg" onclick="onSettingsLinkClicked('settings-wireless')">Wireless</a></li>
+                    <li><a class="text-lg" onclick="onSettingsLinkClicked('settings-system-control')">System</a></li>
+                    <li><a class="text-lg" onclick="onSettingsLinkClicked('settings-firmware')">Firmware Update</a></li>
                 </ul>
             </div>
         </div>
@@ -1028,6 +1051,29 @@
             <form method="dialog">
                 <!-- if there is a button in form, it will close the modal -->
                 <button id="quickChangeProfileConfirmButton" class="btn" onclick="onQuickProfileSelectConfirmed()">Confirm</button>
+            </form>
+        </div>
+    </div>
+</dialog>
+
+<dialog id="recipeDialog" class="modal modal-bottom sm:modal-middle">
+    <div class="modal-box">
+        <form id="recipeDialogForm" class="grid grid-cols-1 gap-2" onsubmit="event.preventDefault()">
+            <h3 id="recipeDialogTitle" class="font-bold text-lg">Recipe</h3>
+            <input type="hidden" name="i">
+            <span class="label-text">Name</span>
+            <input type="text" class="input input-bordered" name="n" maxlength="19" placeholder=".308 Match" required>
+            <span class="label-text">Note (bullet, primer, case ...)</span>
+            <input type="text" class="input input-bordered" name="no" maxlength="27" placeholder="175 SMK, CCI BR2">
+            <span class="label-text">Charge Weight</span>
+            <input type="number" class="input input-bordered" name="t" step="0.001" min="0" required>
+            <span class="label-text">Powder Profile</span>
+            <select class="select select-bordered" name="p" id="recipeProfileSelect"></select>
+        </form>
+        <div class="modal-action">
+            <form method="dialog" class="flex gap-2">
+                <button class="btn">Cancel</button>
+                <button class="btn btn-primary" onclick="saveRecipeDialog()">Save</button>
             </form>
         </div>
     </div>
@@ -1325,6 +1371,12 @@
                 percentage = current_charge_weight / charge_weight_set_point * 100.0;
             }
 
+            // The session statistics follow every few seconds
+            sessionPollCounter += 1;
+            if (sessionPollCounter % 8 == 0) {
+                refreshSessionStats(false);
+            }
+
             // Update web element
             _setCurrentWeight(current_charge_weight, percentage);
             _setChargeModeStateWidget(charge_mode_state);
@@ -1533,6 +1585,8 @@
 
                 // Settings may have changed in the meantime
                 refreshDeviceOptions();
+                renderRecipeSelect();
+                refreshSessionStats(true);
 
                 // Restart
                 _restartPoll();
@@ -1575,7 +1629,7 @@
                 refreshDeviceOptions();
 
                 // Load the first settings
-                onSettingsLinkClicked("settings-scale");
+                onSettingsLinkClicked("settings-charge-mode");
                 
                 break;
             default:
@@ -1589,8 +1643,32 @@
         pollSetTimeoutId = setTimeout(pollChargeModeStatus, 0);
     }
 
+    // Pages that were merged into others (old links, e.g. /#settings-fine-motor)
+    const settingsPageAliases = {
+        "settings-coarse-motor": "settings-motors",
+        "settings-fine-motor": "settings-motors",
+        "settings-neopixel-led": "settings-display",
+        "settings-mini-12864-module": "settings-display",
+    };
+
+    // Fill a form from its REST endpoint
+    async function loadForm(form) {
+        try {
+            const data = await getJson(form.getAttribute("action"));
+            for (const key in data) {
+                const element = form.querySelector('[name="' + key + '"]');
+                if (element) {
+                    element.value = String(data[key]);
+                }
+            }
+        } catch (e) {
+            console.warn(e);
+        }
+    }
+
     // Functions show settings page
     function onSettingsLinkClicked(sectionId) {
+        sectionId = settingsPageAliases[sectionId] || sectionId;
         const targetSection = document.getElementById(sectionId);
         const settingsSectionTitle = document.getElementById("settingsSectionTitle");
 
@@ -1614,34 +1692,22 @@
             settingsDrawer.checked = false;
         }
 
-        if (sectionId == "settings-system-control") {
+        if (sectionId == "settings-firmware") {
             fwRefreshInfo();
         }
-        if (sectionId == "settings-ai-trickle") {
+        if (sectionId == "settings-ai-trickle" || sectionId == "settings-charge-mode") {
             renderAiLimits();
         }
         if (sectionId == "settings-profile") {
             renderProfileNames();
+            renderProfileAi();
+        }
+        if (sectionId == "settings-recipes") {
+            renderRecipes();
         }
 
-        // Populate values
-        const form = targetSection.querySelector("form");
-        if (form) {
-            const uri = form.getAttribute("action");
-            fetch(uri)
-            .then(response => {
-                return response.json();
-            })
-            .then(data => {
-                // Populate the form
-                for (const key in data) {
-                    const element = form.querySelector('[name="' + key + '"]');
-                    if (element) {
-                        element.value = String(data[key]);
-                    }
-                }
-            })
-        }
+        // Populate values of every form on the page
+        targetSection.querySelectorAll("form[action]").forEach(form => loadForm(form));
     }
 
     // Function to retrieve the profile values when the index is updated
@@ -1663,7 +1729,50 @@
                     element.value = String(data[key]);
                 }
             }
+            // Choosing the profile selected it: tolerance and learned values follow
+            loadForm(document.getElementById("profileAiForm"));
+            renderProfileAi();
         })
+    }
+
+    // Send a form to its REST endpoint (GET with the fields as parameters)
+    async function submitForm(targetForm, saveToEeprom) {
+        const paramData = new FormData(targetForm);
+        for (const [key, value] of [...paramData.entries()]) {
+            if (value == "") {
+                paramData.delete(key);
+            }
+        }
+        if (saveToEeprom) {
+            paramData.append('ee', true);
+        }
+        const uri = new URL(targetForm.action + '?');
+        uri.search = new URLSearchParams(paramData).toString();
+        const response = await fetch(uri);
+        return response.json();
+    }
+
+    // Apply all forms of a settings page, then show what the trickler took
+    async function applySettingsPage(section, saveToEeprom) {
+        try {
+            for (const form of section.querySelectorAll("form[action]")) {
+                await submitForm(form, saveToEeprom);
+            }
+        } catch (e) {
+            alert("Failed to apply the settings");
+            return;
+        }
+        for (const form of section.querySelectorAll("form[action]")) {
+            await loadForm(form);
+        }
+        // Other pages may depend on what changed (servo gate, AI mode, motor limits)
+        await refreshDeviceOptions();
+        renderAiLimits();
+        if (section.id == "settings-profile") {
+            renderProfileNames();
+            renderProfileAi();
+        }
+        document.getElementById("settingsAppliedSuccessDialog").showModal();
     }
 
     // Submit the form data to the action URI
@@ -1707,49 +1816,28 @@
                 }
             })
 
-            // Other pages may depend on what changed (servo gate, AI mode, motor limits)
-            refreshDeviceOptions();
-            if (targetForm.id == "aiTrickleConfigForm") {
-                renderAiLimits();
-            }
-
             // Show the success modal
             const settingsAppliedSuccessDialog = document.getElementById("settingsAppliedSuccessDialog");
             settingsAppliedSuccessDialog.showModal();
         })
     }
 
-    // Function to populate the dialog when Apply button is pressed for settings
-    const allApplyButtons = document.querySelectorAll(".settings-apply-btn");
-    allApplyButtons.forEach(applyButton => {
+    // Apply button of a settings page: ask whether to save to the EEPROM too
+    document.querySelectorAll(".page-apply-btn").forEach(applyButton => {
         applyButton.addEventListener("click", (event) => {
-            event.preventDefault();  // Cancel default event
+            event.preventDefault();
 
-            const form = applyButton.form;
+            const section = applyButton.closest("section");
+            document.getElementById("applySettingsDialogTitle").innerText = section.getAttribute("name");
 
-            // Create the dialog
-            const applySettingsDialog = document.getElementById("applySettingsDialog");
-
-            // Update dialog title
-            applySettingsDialogTitle = document.getElementById("applySettingsDialogTitle");
-            const sectioName = form.closest("section").getAttribute("name");
-            applySettingsDialogTitle.innerText = sectioName;
-
-            // Bind the button
-            const dialogApplySettingsButton = document.getElementById("dialogApplySettingsButton");
-            const dialogSaveToEepromButton = document.getElementById("dialogSaveToEepromButton");
-
-            // Bind actions
-            dialogApplySettingsButton.onclick = function() {
-                putForm(form, false);
+            document.getElementById("dialogApplySettingsButton").onclick = function() {
+                applySettingsPage(section, false);
+            }
+            document.getElementById("dialogSaveToEepromButton").onclick = function() {
+                applySettingsPage(section, true);
             }
 
-            dialogSaveToEepromButton.onclick = function() {
-                putForm(form, true);
-            }
-
-            // Show the dialog
-            applySettingsDialog.showModal();
+            document.getElementById("applySettingsDialog").showModal();
         })
     })
 
@@ -1902,6 +1990,13 @@
             config["config"][endpoint] = data;
         }
 
+        // Recipes are a list, restored separately
+        try {
+            config["recipes"] = (await getJson("/rest/recipes")).r;
+        } catch (e) {
+            console.warn(e);
+        }
+
         // download as a file
         const blob = new Blob([JSON.stringify(config, null, "\t")], {type: 'application/json'});
         const url = URL.createObjectURL(blob);
@@ -1910,6 +2005,26 @@
         a.download = "opentrickler_"+config["unique_id"]+"_config.json";
         a.click();
         URL.revokeObjectURL(url);
+    }
+
+    // Replace the recipes with the ones of a backup, one after the other
+    async function restoreRecipes(list) {
+        try {
+            let current = (await getJson("/rest/recipes")).r;
+            for (let i = current.length - 1; i >= 0; i -= 1) {
+                await getJson(`/rest/recipes?del=${i}`);
+            }
+            for (let i = 0; i < list.length; i += 1) {
+                const r = list[i];
+                const params = new URLSearchParams({i: i, n: r[0], no: r[1], t: r[2], p: r[3], ee: i == list.length - 1});
+                await getJson("/rest/recipes?" + params.toString());
+            }
+            if (!list.length) {
+                await getJson("/rest/recipes?ee=true");
+            }
+        } catch (e) {
+            console.warn(e);
+        }
     }
 
     async function onImportConfigClicked() {
@@ -1952,6 +2067,10 @@
                         const uri = new URL(endpoint + "?", window.location.origin);
                         uri.search = queryString;
                         fetch(uri);
+                    }
+
+                    if (Array.isArray(data["recipes"])) {
+                        restoreRecipes(data["recipes"]);
                     }
 
                     // Update form
@@ -2032,6 +2151,368 @@
         renderProfileNames();
     }
 
+
+    // ---------------------------------------------------------------------
+    // Recipes: charge weight and powder profile of a load
+    let recipes = [];
+    let recipeApplied = -1;
+    let profileNames = [];
+
+    async function loadRecipes(query) {
+        const data = await getJson("/rest/recipes" + (query ? "?" + query : ""));
+        recipes = data.r || [];
+        recipeApplied = data.a;
+        return data;
+    }
+
+    async function loadProfileNames() {
+        try {
+            const summary = await getJson("/rest/profile_summary");
+            // s0 is {index: name}
+            const names = summary.s0 || {};
+            profileNames = Object.keys(names).sort((a, b) => a - b).map(k => names[k]);
+        } catch (e) {
+            console.warn(e);
+        }
+    }
+
+    function escapeHtml(text) {
+        return String(text).replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+    }
+
+    function recipeProfileName(pf) {
+        return profileNames[pf] ? `#${pf} ${profileNames[pf]}` : `#${pf}`;
+    }
+
+    async function renderRecipes() {
+        const list = document.getElementById("recipeList");
+        try {
+            await Promise.all([loadRecipes(), loadProfileNames()]);
+        } catch (e) {
+            list.textContent = "Recipes could not be read.";
+            return;
+        }
+        if (!recipes.length) {
+            list.innerHTML = '<span class="text-sm opacity-80">No recipes yet.</span>';
+            return;
+        }
+        list.innerHTML = recipes.map((r, i) => `
+            <div class="card bg-base-200">
+                <div class="card-body p-3 gap-1">
+                    <div class="font-bold">${escapeHtml(r[0])}${i == recipeApplied ? ' <span class="badge badge-primary">in use</span>' : ""}</div>
+                    <div class="text-sm">${Number(r[2]).toFixed(3)} gr · ${escapeHtml(recipeProfileName(r[3]))}</div>
+                    ${r[1] ? `<div class="text-sm opacity-80">${escapeHtml(r[1])}</div>` : ""}
+                    <div class="grid grid-cols-3 gap-2 mt-1">
+                        <button class="btn btn-sm" onclick="openRecipeDialog(${i})">Edit</button>
+                        <button class="btn btn-sm" onclick="moveRecipeUp(${i})" ${i == 0 ? "disabled" : ""}>Up</button>
+                        <button class="btn btn-sm btn-warning" onclick="deleteRecipe(${i})">Delete</button>
+                    </div>
+                </div>
+            </div>`).join("");
+    }
+
+    async function openRecipeDialog(idx) {
+        await loadProfileNames();
+        const form = document.getElementById("recipeDialogForm");
+        const select = document.getElementById("recipeProfileSelect");
+        select.innerHTML = profileNames.map((n, i) => `<option value="${i}">${escapeHtml(recipeProfileName(i))}</option>`).join("");
+        const r = idx >= 0 ? recipes[idx] : null;
+        form.elements["i"].value = idx >= 0 ? idx : recipes.length;
+        form.elements["n"].value = r ? r[0] : "";
+        form.elements["no"].value = r ? r[1] : "";
+        const weight = document.getElementById("chargeWeightInput").value;
+        form.elements["t"].value = r ? Number(r[2]).toFixed(3) : (weight || "");
+        form.elements["p"].value = r ? r[3] : (aiConfig ? aiConfig.pf : 0);
+        document.getElementById("recipeDialogTitle").textContent = r ? "Edit Recipe" : "New Recipe";
+        document.getElementById("recipeDialog").showModal();
+    }
+
+    async function saveRecipeDialog() {
+        const form = document.getElementById("recipeDialogForm");
+        const name = form.elements["n"].value.trim();
+        const weight = Number(String(form.elements["t"].value).replace(",", "."));
+        if (!name || !(weight > 0)) {
+            alert("Please enter a name and a charge weight.");
+            return;
+        }
+        const params = new URLSearchParams({
+            i: form.elements["i"].value, n: name, no: form.elements["no"].value.trim(),
+            t: weight, p: form.elements["p"].value, ee: true,
+        });
+        try {
+            await loadRecipes(params.toString());
+        } catch (e) {
+            alert("Failed to save the recipe");
+        }
+        renderRecipes();
+        renderRecipeSelect();
+    }
+
+    async function deleteRecipe(idx) {
+        if (!confirm(`Delete the recipe "${recipes[idx][0]}"?`)) {
+            return;
+        }
+        await loadRecipes(`del=${idx}&ee=true`);
+        renderRecipes();
+        renderRecipeSelect();
+    }
+
+    async function moveRecipeUp(idx) {
+        await loadRecipes(`up=${idx}&ee=true`);
+        renderRecipes();
+        renderRecipeSelect();
+    }
+
+    // Trickler page: choose a recipe instead of typing the weight
+    async function renderRecipeSelect() {
+        const select = document.getElementById("recipeSelect");
+        try {
+            await Promise.all([loadRecipes(), loadProfileNames()]);
+        } catch (e) {
+            return;
+        }
+        select.style.display = recipes.length ? "" : "none";
+        select.innerHTML = '<option value="-1">No recipe (enter the charge weight)</option>' +
+            recipes.map((r, i) => `<option value="${i}">${escapeHtml(r[0])} · ${Number(r[2]).toFixed(3)} gr</option>`).join("");
+        select.value = String(recipeApplied);
+        // A recipe chosen on the display fills the charge weight here too
+        const input = document.getElementById("chargeWeightInput");
+        if (recipes[recipeApplied] && input.value == "") {
+            input.value = Number(recipes[recipeApplied][2]).toFixed(3);
+        }
+        showRecipeNote();
+    }
+
+    function showRecipeNote() {
+        const note = document.getElementById("recipeNote");
+        const r = recipes[recipeApplied];
+        note.style.display = r ? "" : "none";
+        note.textContent = r ? `${recipeProfileName(r[3])}${r[1] ? " · " + r[1] : ""}` : "";
+    }
+
+    async function onRecipeSelected(select) {
+        const idx = Number(select.value);
+        if (idx < 0) {
+            recipeApplied = -1;
+            showRecipeNote();
+            return;
+        }
+        let data;
+        try {
+            data = await loadRecipes(`apply=${idx}`);
+        } catch (e) {
+            data = {ok: false};
+        }
+        if (!data.ok) {
+            alert("The recipe cannot be applied while a charge is running.");
+            select.value = String(recipeApplied);
+            return;
+        }
+        document.getElementById("chargeWeightInput").value = Number(recipes[idx][2]).toFixed(3);
+        showRecipeNote();
+        refreshDeviceOptions();
+        _restartPoll();
+    }
+
+    // ---------------------------------------------------------------------
+    // Session statistics and CSV export of the charges logged by the trickler
+    const FLAG_ADAPTIVE = 1, FLAG_LEARN = 2, FLAG_PROBE = 4, FLAG_FAULT = 8, FLAG_SERIES = 32;
+    let sessionCharges = new Map();
+    let sessionStart = 0;
+    let sessionLatest = 0;
+    let sessionPollCounter = 0;
+    let sessionBusy = false;
+
+    async function fetchCharges(since) {
+        let data;
+        for (let page = 0; page < 10; page += 1) {
+            data = await getJson(`/rest/ai_history?since=${since}`);
+            for (const h of data.h) {
+                sessionCharges.set(h[0], {
+                    seq: h[0], pf: h[1], target: h[2], final: h[3], time: h[5], topups: h[6], flags: h[7],
+                    tol: h[9], recipe: h[10], uptime: h[11],
+                });
+                since = h[0];
+            }
+            if (!data.more) {
+                break;
+            }
+        }
+        return data;
+    }
+
+    async function refreshSessionStats(full) {
+        if (sessionBusy) {
+            return;
+        }
+        sessionBusy = true;
+        try {
+            if (full) {
+                await Promise.all([loadRecipes(), loadProfileNames()]);
+            }
+            // Re-read the last charge too: taps change its result
+            let data = await fetchCharges(full ? 0 : Math.max(0, sessionLatest - 1));
+            if (data.seq < sessionLatest) {
+                // Rebooted: the log starts again
+                sessionCharges = new Map();
+                data = await fetchCharges(0);
+            }
+            sessionStart = data.ss;
+            sessionLatest = data.seq;
+            renderSessionStats();
+        } catch (e) {
+            console.warn(e);
+        } finally {
+            sessionBusy = false;
+        }
+    }
+
+    function sessionList() {
+        return [...sessionCharges.values()].filter(c => c.seq > sessionStart).sort((a, b) => a.seq - b.seq);
+    }
+
+    function chargeGroupName(c) {
+        const r = c.recipe >= 0 ? recipes[c.recipe] : null;
+        if (r) {
+            return r[0];
+        }
+        return `${Number(c.target).toFixed(3)} gr · ${profileNames[c.pf] || "#" + c.pf}`;
+    }
+
+    function statsOf(list) {
+        const ok = list.filter(c => !(c.flags & FLAG_FAULT) && c.final !== null);
+        const n = ok.length;
+        if (!n) {
+            return {n: 0};
+        }
+        const finals = ok.map(c => c.final);
+        const mean = finals.reduce((a, b) => a + b, 0) / n;
+        const sd = n > 1 ? Math.sqrt(finals.reduce((a, b) => a + (b - mean) * (b - mean), 0) / (n - 1)) : 0;
+        const inTol = ok.filter(c => Math.abs(c.final - c.target) <= c.tol + 0.0005).length;
+        const over = ok.filter(c => c.final - c.target > c.tol + 0.0005).length;
+        return {
+            n, mean, sd, es: Math.max(...finals) - Math.min(...finals), inTol, over, under: n - inTol - over,
+            meanTime: ok.reduce((a, c) => a + c.time, 0) / n, faults: list.length - n,
+        };
+    }
+
+    function renderSessionStats() {
+        const list = sessionList();
+        const summary = document.getElementById("sessionSummary");
+        const body = document.getElementById("sessionGroups");
+        if (!list.length) {
+            summary.textContent = "No charges in this session yet.";
+            body.innerHTML = "";
+            return;
+        }
+        const all = statsOf(list);
+        const truncated = sessionStart == 0 && list[0].seq > 1;
+        summary.innerHTML = `<b>${list.length}</b> charges` +
+            (all.n ? `, <b>${(all.inTol / all.n * 100).toFixed(0)}%</b> in tolerance (${all.over} over, ${all.under} under), Ø ${all.meanTime.toFixed(1)} s per charge` : "") +
+            (all.faults ? `, ${all.faults} aborted` : "") + "." +
+            (truncated ? " The trickler keeps the last 150 charges." : "");
+
+        const groups = new Map();
+        for (const c of list) {
+            const key = chargeGroupName(c);
+            if (!groups.has(key)) {
+                groups.set(key, []);
+            }
+            groups.get(key).push(c);
+        }
+        body.innerHTML = [...groups.entries()].map(([name, charges]) => {
+            const st = statsOf(charges);
+            if (!st.n) {
+                return `<tr><td>${escapeHtml(name)}</td><td>0</td><td colspan="5">-</td></tr>`;
+            }
+            return `<tr><td>${escapeHtml(name)}</td><td>${st.n}</td><td>${st.mean.toFixed(3)}</td><td>${st.sd.toFixed(3)}</td>` +
+                   `<td>${st.es.toFixed(3)}</td><td>${(st.inTol / st.n * 100).toFixed(0)}%</td><td>${st.meanTime.toFixed(1)} s</td></tr>`;
+        }).join("");
+    }
+
+    async function startNewSession() {
+        if (!confirm("Start a new session? The statistics and the CSV export start from zero.")) {
+            return;
+        }
+        // Offer the old session first, it is not shown any more afterwards
+        if (sessionList().length && confirm("Export the current session as CSV first?")) {
+            await downloadSessionCsv();
+        }
+        try {
+            await getJson("/rest/ai_history?since=" + sessionLatest + "&ns=true");
+        } catch (e) {
+            console.warn(e);
+        }
+        await refreshSessionStats(true);
+    }
+
+    // CSV for German spreadsheets: semicolons and decimal commas
+    function csvNumber(v, digits) {
+        return v === null || v === undefined || Number.isNaN(v) ? "" : Number(v).toFixed(digits).replace(".", ",");
+    }
+
+    function csvText(v) {
+        return '"' + String(v).replace(/"/g, '""') + '"';
+    }
+
+    function formatUptime(s) {
+        const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, sec = s % 60;
+        return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+    }
+
+    async function downloadSessionCsv() {
+        await refreshSessionStats(false);
+        const list = sessionList();
+        if (!list.length) {
+            alert("No charges in this session.");
+            return;
+        }
+        const rows = [["Charge", "Time since start", "Profile", "Recipe", "Target (gr)", "Result (gr)", "Error (gr)",
+                       "Tolerance (gr)", "In tolerance", "Charge time (s)", "Top ups", "Controller", "Type"].map(csvText).join(";")];
+        for (const c of list) {
+            const fault = (c.flags & FLAG_FAULT) || c.final === null;
+            const type = fault ? "aborted" : (c.flags & FLAG_PROBE) ? "probe" : (c.flags & FLAG_LEARN) ? "learning" :
+                         (c.flags & FLAG_SERIES) ? "series" : "charge";
+            const error = fault ? null : c.final - c.target;
+            rows.push([
+                c.seq, csvText(formatUptime(c.uptime)), csvText(profileNames[c.pf] || "#" + c.pf),
+                csvText(c.recipe >= 0 && recipes[c.recipe] ? recipes[c.recipe][0] : ""),
+                csvNumber(c.target, 3), csvNumber(fault ? null : c.final, 3), csvNumber(error, 3), csvNumber(c.tol, 3),
+                fault ? "" : (Math.abs(error) <= c.tol + 0.0005 ? "yes" : "no"),
+                csvNumber(c.time, 1), c.topups, (c.flags & FLAG_ADAPTIVE) ? "AI" : "PID", type,
+            ].join(";"));
+        }
+        // Excel reads the umlauts with a BOM
+        const blob = new Blob(["﻿" + rows.join("\r\n") + "\r\n"], {type: "text/csv;charset=utf-8"});
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = `opentrickler-session-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    }
+
+    // ---------------------------------------------------------------------
+    // Profiles page: what AI Trickle learned for the selected profile
+    async function renderProfileAi() {
+        const info = document.getElementById("aiProfileInfo");
+        try {
+            const c = await getJson("/rest/ai_config");
+            if (!c.rd) {
+                info.textContent = `${c.pn}: nothing learned yet. Run a learning session on the AI page or just charge, AI Trickle learns along.`;
+                return;
+            }
+            const parts = [`speed ${c.sp}${c.a4 ? " (auto)" : ""}`];
+            if (c.est !== null) parts.push(`≈ ${Number(c.est).toFixed(0)} s for ${c.tg} gr`);
+            if (c.kw > 0) parts.push(`kernel/clump ≈ ${Number(c.kw).toFixed(3)} gr`);
+            if (c.rv && c.a8 === "auto" && (c.rv[2] + c.rv[3] + c.rv[4]) > 0) parts.push(`fine reverse ${Number(c.rv[0]).toFixed(2)} rev`);
+            info.textContent = `${c.pn}: model ready, ${parts.join(", ")}.`;
+        } catch (e) {
+            info.textContent = "-";
+        }
+    }
+
     // Tap: the charge loop turns the fine trickler once per request
     async function tapFineTrickler() {
         try {
@@ -2066,6 +2547,10 @@
         }
         try {
             aiConfig = await getJson("/rest/ai_config");
+            const ai = aiConfig.a0 === true || aiConfig.a0 === "true";
+            document.querySelectorAll(".requires-pid").forEach(el => { el.style.display = ai ? "none" : ""; });
+            document.querySelectorAll(".requires-ai").forEach(el => { el.style.display = ai ? "" : "none"; });
+            document.getElementById("aiOffNotice").style.display = ai ? "none" : "";
         } catch (e) {
             aiConfig = null;
         }
@@ -2124,8 +2609,8 @@
                     (n ? `${c.pn}: reverse in use ${Number(c.rv[0]).toFixed(2)} rev, best so far ${Number(c.rv[5]).toFixed(2)} rev ` +
                          `(charges with 0 / 0.02 / 0.05 rev: ${c.rv[2]} / ${c.rv[3]} / ${c.rv[4]}), dribble after the stop ≈ ${Number(c.rv[1]).toFixed(3)} gr.` :
                          `${c.pn}: nothing learned yet, the first charges try the candidates.`) :
-                    (c.a8 === "off" ? "The reverse is off (Settings → Charge Mode)." :
-                     `Fixed ${Number(c.a8).toFixed(2)} rev (Settings → Charge Mode)` +
+                    (c.a8 === "off" ? "The reverse is off (Settings → Charging)." :
+                     `Fixed ${Number(c.a8).toFixed(2)} rev (Settings → Charging)` +
                      (c.rv[2] ? `, ${c.pn}: dribble after the stop ≈ ${Number(c.rv[1]).toFixed(3)} gr (${c.rv[2]} charges).` : "."));
             }
             info.innerHTML =
@@ -2440,7 +2925,8 @@
 
     // Open a settings page directly, e.g. /#settings-ai-trickle
     function onPageLoaded() {
-        const hash = window.location.hash.substring(1);
+        let hash = window.location.hash.substring(1);
+        hash = settingsPageAliases[hash] || hash;
         if (hash.startsWith("settings-") && document.getElementById(hash)) {
             onNavButtonClicked('settings');
             onSettingsLinkClicked(hash);

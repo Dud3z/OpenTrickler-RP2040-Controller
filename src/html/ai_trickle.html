@@ -568,7 +568,26 @@ async function refreshDeviceSettings() {
 }
 
 async function refreshHistory() {
-    const data = await getJson("/rest/ai_history?since=" + state.lastSeq);
+    // The trickler sends the charges page by page, the oldest first
+    let data;
+    for (let page = 0; page < 10; page += 1) {
+        // After a reboot the sequence starts again
+        const probe = await getJson("/rest/ai_history?since=" + state.lastSeq);
+        if (probe.seq < state.lastSeq) {
+            state.lastSeq = 0;
+            continue;
+        }
+        data = probe;
+        addHistoryPage(data);
+        if (!data.more) {
+            break;
+        }
+    }
+    saveLog();
+    renderHistory();
+}
+
+function addHistoryPage(data) {
     for (const h of data.h) {
         const entry = {
             seq: h[0], pf: h[1], target: h[2], final: h[3], landing: h[4], time: h[5],
@@ -579,9 +598,7 @@ async function refreshHistory() {
             state.log.push(entry);
         }
     }
-    state.lastSeq = data.seq;
-    saveLog();
-    renderHistory();
+    state.lastSeq = data.h.length ? data.h[data.h.length - 1][0] : data.seq;
 }
 
 async function refreshTrace() {
@@ -1131,7 +1148,7 @@ How the "AI Trickle" controller works:
 - ai_config.kw is a rough estimate of the kernel (or typical clump) weight from the kernel noise of the fine flow;
   clumpy powders read high, ball powder reads low. If it is larger than the tolerance, single kernels decide and
   some charges will be just outside; suggest the Tap button (turns the fine tube by a7 degrees) or a wider tolerance.
-- ai_config.a8 (same as charge_mode_config.c17, set by the user under Settings → Charge Mode, used in both charge modes) is the fine tube reverse after each stop against dribble from the tube lip: "auto" (tries 0 / 0.02 / 0.05 rev per profile and keeps the one with the least dribble), "off" or fixed revolutions (0.01 to 0.3). Too much reverse throws kernels out of the tube. ai_config.rv = [revolutions in use, expected dribble after the stop in gr, charges with 0 / 0.02 / 0.05 rev, best candidate in rev].
+- ai_config.a8 (same as charge_mode_config.c17, set by the user under Settings → Charging, used in both charge modes) is the fine tube reverse after each stop against dribble from the tube lip: "auto" (tries 0 / 0.02 / 0.05 rev per profile and keeps the one with the least dribble), "off" or fixed revolutions (0.01 to 0.3). Too much reverse throws kernels out of the tube. ai_config.rv = [revolutions in use, expected dribble after the stop in gr, charges with 0 / 0.02 / 0.05 rev, best candidate in rev].
 - Tolerance (ai_config.a5, per profile) and speed are independent. Speed 0 = careful (slow final approach, tops up anything in the
   lower half of the band), 100 = fast (quick approach, only tops up readings outside the tolerance).
 - Auto speed (ai_config.a4): per profile the speed rises by 10 after 12 charges without over charge, as long as the mean

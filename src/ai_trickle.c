@@ -7,7 +7,9 @@
 #include <FreeRTOS.h>
 #include <queue.h>
 
+#include "pico/time.h"
 #include "ai_trickle.h"
+#include "recipe.h"
 #include "app.h"
 #include "charge_mode.h"
 #include "common.h"
@@ -384,8 +386,11 @@ bool ai_trickle_adaptive_active(void) {
 }
 
 
+static uint32_t session_start_seq = 0;     // Statistics session: charges after this one
+
 static void history_add(float target, float final, float landing, float time_s, uint8_t topups, uint8_t flags) {
     ai_trickle_history_entry_t * entry = &history[history_seq % AI_TRICKLE_HISTORY_LEN];
+    memset(entry, 0x0, sizeof(*entry));
 
     history_seq += 1;
     entry->seq = history_seq;
@@ -397,6 +402,19 @@ static void history_add(float target, float final, float landing, float time_s, 
     entry->level = speed_for_profile(throw_profile_idx);
     entry->topups = topups;
     entry->flags = flags;
+    entry->uptime_s = to_ms_since_boot(get_absolute_time()) / 1000;
+    entry->tolerance_mgr = (uint16_t) (tolerance_for_profile(throw_profile_idx) * 1000.0f + 0.5f);
+    entry->recipe_idx = recipe_active_for(throw_profile_idx, target);
+}
+
+
+void ai_trickle_history_update_final(float final_gr) {
+    if (history_seq == 0 || isnan(final_gr) || isinf(final_gr)) {
+        return;
+    }
+    ai_trickle_history_entry_t * entry = &history[(history_seq - 1) % AI_TRICKLE_HISTORY_LEN];
+    entry->final_gr = final_gr;
+    last_error_gr = final_gr - entry->target_gr;
 }
 
 
@@ -1255,35 +1273,48 @@ bool http_rest_ai_status(struct fs_file *file, int num_params, char *params[], c
 bool http_rest_ai_history(struct fs_file *file, int num_params, char *params[], char *values[]) {
     // Mappings
     // since (int): only return throws with a larger sequence number
-    // Response: {"seq": latest, "h": [[seq, profile, target, final, landing, time, topups, flags, level], ...]}
-    static char buf[64 + AI_TRICKLE_HISTORY_LEN * 96];
+    // ns (bool): start a new statistics session (after the latest charge)
+    // Response: {"seq": latest, "ss": session start, "up": uptime s, "more": more after this page,
+    //            "h": [[seq, profile, target, final, landing, time, topups, flags, level, tolerance, recipe, uptime s], ...]}
+    // At most AI_TRICKLE_HISTORY_PAGE charges per response, the oldest first
+    static char buf[96 + AI_TRICKLE_HISTORY_PAGE * 112];
     uint32_t since = 0;
 
     for (int idx = 0; idx < num_params; idx += 1) {
         if (strcmp(params[idx], "since") == 0) {
             since = strtoul(values[idx], NULL, 10);
         }
+        else if (strcmp(params[idx], "ns") == 0 && string_to_boolean(values[idx])) {
+            session_start_seq = history_seq;
+        }
     }
 
-    size_t pos = snprintf(buf, sizeof(buf), "%s{\"seq\":%lu,\"h\":[", http_json_header, (unsigned long) history_seq);
-
-    uint32_t first = history_seq > AI_TRICKLE_HISTORY_LEN ? history_seq - AI_TRICKLE_HISTORY_LEN + 1 : 1;
-    if (since + 1 > first) {
-        first = since + 1;
+    uint32_t first_avail = history_seq > AI_TRICKLE_HISTORY_LEN ? history_seq - AI_TRICKLE_HISTORY_LEN + 1 : 1;
+    uint32_t start = since + 1 > first_avail ? since + 1 : first_avail;
+    uint32_t last = history_seq;
+    bool more = false;
+    if (last >= start && last - start + 1 > AI_TRICKLE_HISTORY_PAGE) {
+        last = start + AI_TRICKLE_HISTORY_PAGE - 1;
+        more = true;
     }
+
+    size_t pos = snprintf(buf, sizeof(buf), "%s{\"seq\":%lu,\"ss\":%lu,\"up\":%lu,\"more\":%s,\"h\":[",
+                          http_json_header, (unsigned long) history_seq, (unsigned long) session_start_seq,
+                          (unsigned long) (to_ms_since_boot(get_absolute_time()) / 1000), boolean_to_string(more));
 
     bool comma = false;
-    for (uint32_t seq = first; seq <= history_seq && pos < sizeof(buf) - 100; seq += 1) {
+    for (uint32_t seq = start; seq <= last && pos < sizeof(buf) - 112; seq += 1) {
         const ai_trickle_history_entry_t * e = &history[(seq - 1) % AI_TRICKLE_HISTORY_LEN];
         char final_buf[16];
         char landing_buf[16];
         json_float(final_buf, sizeof(final_buf), e->final_gr, 3);
         json_float(landing_buf, sizeof(landing_buf), e->landing_gr, 3);
 
-        pos += snprintf(&buf[pos], sizeof(buf) - pos, "%s[%lu,%u,%.3f,%s,%s,%.2f,%u,%u,%u]",
+        pos += snprintf(&buf[pos], sizeof(buf) - pos, "%s[%lu,%u,%.3f,%s,%s,%.2f,%u,%u,%u,%.3f,%d,%lu]",
                         comma ? "," : "",
                         (unsigned long) e->seq, e->profile_idx, e->target_gr, final_buf, landing_buf,
-                        e->time_s, e->topups, e->flags, e->level);
+                        e->time_s, e->topups, e->flags, e->level, e->tolerance_mgr * 0.001f,
+                        e->recipe_idx == RECIPE_NONE ? -1 : e->recipe_idx, (unsigned long) e->uptime_s);
         comma = true;
     }
 

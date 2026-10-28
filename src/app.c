@@ -28,6 +28,7 @@
 #include "profile.h"
 #include "servo_gate.h"
 #include "ai_trickle.h"
+#include "recipe.h"
 
 
 // Show the init step on the display, so a hang during start up can be located
@@ -82,6 +83,10 @@ int main()
     // Initialize the adaptive trickle models (after the profiles)
     boot_status("AI Trickle");
     ai_trickle_init();
+
+    // Recipes (after the profiles)
+    boot_status("Recipes");
+    recipe_init();
 
     // Initialize the servo
     boot_status("Servo gate");

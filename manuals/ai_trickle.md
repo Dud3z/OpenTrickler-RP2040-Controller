@@ -36,10 +36,13 @@ If a profile has not been learned yet, the first charge automatically starts wit
 
 Settings live where all other settings are, in the web portal under **Settings**:
 
-* **Settings → AI Trickle:** on/off, tolerance, auto speed, speed, keep learning, throws per learning session
-* **Settings → Profiles / Charge Mode:** a note says which values the AI uses (the min/max flow speeds) and which only the classic PID controller uses (Kp/Ki/Kd, stop thresholds)
-* **Settings → Scale:** scale diagnostics
-* **Settings → System Control:** firmware update
+The settings menu is grouped (see [recipes_statistics_settings.md](recipes_statistics_settings.md) for all pages):
+
+* **Charging → Charging:** the controller (AI Trickle or Classic PID), what happens after the stop (coarse backoff, fine tube reverse, tap angle) and the servo gate sequence
+* **Powder → Profiles:** speeds and the **tolerance** of the profile, plus what AI Trickle has learned for it. Kp/Ki/Kd are only shown with the Classic PID controller
+* **AI → AI Trickle:** auto speed, speed, keep learning, throws per learning session, the limits in use
+* **Hardware → Scale:** scale diagnostics
+* **System → Firmware Update:** online update
 
 The **AI** button in the bottom bar (or `http://<trickler-ip>/ai`) opens the analysis page with three tabs: **Overview**, **Learn** (learning, series & ladder, model and backup) and **Assistant** (Claude).
 
@@ -132,7 +135,7 @@ From speed 50 on, a top up starts as soon as the scale shows the charge is clear
 
 ### Fine tube reverse, kernel weight, tolerance per profile
 
-* **Fine tube reverse:** after every fine stop (main stop and each top up) the fine tube turns back a little, so kernels sitting on the tube lip are pulled back instead of dribbling into the pan while the scale settles. Too much reverse does the opposite and flicks kernels out of the tube, so the reverse is now timed exactly (at 1 rev/s, independent of the scale rate) and is short. It works in both charge modes (AI and classic PID). Set it under *Settings* → **Charge Mode**, next to the coarse stop backoff:
+* **Fine tube reverse:** after every fine stop (main stop and each top up) the fine tube turns back a little, so kernels sitting on the tube lip are pulled back instead of dribbling into the pan while the scale settles. Too much reverse does the opposite and flicks kernels out of the tube, so the reverse is now timed exactly (at 1 rev/s, independent of the scale rate) and is short. It works in both charge modes (AI and classic PID). Set it under *Settings* → **Charging** (After the Stop), next to the coarse stop backoff:
   * **Auto** (default): per profile the charges try 0, 0.02 and 0.05 rev (6 charges each, later every 10th charge re-checks one) and keep the one with the least dribble after the stop. The dribble that remains is learned as well and taken into account when sizing the top ups. *Settings* → **AI Trickle** shows what Auto has learned for the profile: the value in use, the best one so far and how many charges each candidate had.
   * Without AI Trickle nothing is measured, so Auto uses 0.02 rev there.
   * **Off**, or a **fixed** value from 0.01 to 0.3 rev.
@@ -144,11 +147,11 @@ From speed 50 on, a top up starts as soon as the scale shows the charge is clear
 
 * **Motor settings:** the max/min speed caps the profile speeds (the lower value wins), the acceleration and gear ratio give the motor ramp. The controller ramps its commands the same way and counts the powder that still comes while a motor slows down. Settings → AI Trickle shows the limits in use and warns when a motor setting caps the profile.
 * **Profiles:** the min/max flow speeds are used by both controllers; Kp/Ki/Kd only by the classic PID controller (marked in the settings).
-* **Charge Mode:** the stop thresholds only apply to the classic controller (marked). Backoff, LED colours, decimal places, zero check and pre-charge apply to both.
-* **Servo gate:** when it is disabled, the gate controls on the Trickler page and the pre-charge/gate fields under Charge Mode are hidden.
-* **Export/Import Config** (System Control) includes the AI Trickle settings.
+* **Charging:** the stop thresholds only apply to the classic controller and are only shown with it. Backoff, fine reverse, decimal places, zero check and pre-charge apply to both; the charge LED colours are under Display & LEDs.
+* **Servo gate:** when it is disabled, the gate controls on the Trickler page and the servo gate sequence under Charging are hidden.
+* **Export/Import Config** (System) includes the AI Trickle settings and the recipes.
 
-### Does the AI change the Charge Mode settings?
+### Does the AI change the Charging settings?
 
 No. The adaptive controller does not use the PID gains (Kp/Ki/Kd) or the coarse/fine stop thresholds at all; it plans every charge from the learned model. It does use from the profile and charge mode settings: the **min/max speeds** of both tubes, the coarse backoff, the servo gate, precharge, the LED colours, the decimal places and the zero check.
 

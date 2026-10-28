@@ -19,7 +19,8 @@
 
 #define EEPROM_AI_TRICKLE_DATA_REV          4       // 16 bit
 
-#define AI_TRICKLE_HISTORY_LEN              32
+#define AI_TRICKLE_HISTORY_LEN              150     // Charges kept in RAM (statistics, CSV, AI page)
+#define AI_TRICKLE_HISTORY_PAGE             40      // Charges per /rest/ai_history response
 #define AI_TRICKLE_DEFAULT_LEARN_THROWS     8
 #define AI_TRICKLE_MAX_LEARN_THROWS         20
 
@@ -95,6 +96,10 @@ typedef struct {
     uint8_t level;
     uint8_t topups;
     uint8_t flags;
+    uint32_t uptime_s;      // Time of the charge since boot
+    uint16_t tolerance_mgr; // Tolerance of the profile in 0.001 gr
+    uint8_t recipe_idx;     // RECIPE_NONE without recipe
+    uint8_t reserved;
 } ai_trickle_history_entry_t;
 
 
@@ -122,6 +127,9 @@ void ai_trickle_classic_begin(void);
 void ai_trickle_classic_sample(float t, float weight_gr, float coarse_rps, float fine_rps);
 void ai_trickle_classic_coarse_stop(float t);
 void ai_trickle_classic_end(float target_gr, float settled_gr, float charge_time_s);
+
+// Result of the last charge changed after it was logged (tapped up by hand)
+void ai_trickle_history_update_final(float final_gr);
 
 void ai_trickle_adaptive_begin(float target_gr, const trickle_motor_limits_t * limits, float current_weight_gr);
 trickle_phase_t ai_trickle_adaptive_step(float t, float weight_gr, float * coarse_rps, float * fine_rps,
