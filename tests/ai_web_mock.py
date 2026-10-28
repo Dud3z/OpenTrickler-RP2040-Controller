@@ -50,7 +50,11 @@ STATE = {
     'reboot_until': 0.0,
     'models': {},
     'requests': [],
+    'selected': 0,
+    'taps': 0,
 }
+
+NAMES = [EXPORT['model']['pn'], 'AR2209,gr', '8208XBR,gr', 'Benchmark2,gr', 'Profile4', 'Profile5', 'Profile6', 'Profile7']
 
 PROFILE = {'pf': 0, 'p0': 0, 'p1': 0, 'p2': EXPORT['model']['pn'], 'p3': 0.05, 'p4': 0.0, 'p5': 0.3, 'p6': 0.1,
            'p7': 8.0, 'p8': 0.8, 'p9': 0.0, 'p10': 15.0, 'p11': 0.08, 'p12': 2.0}
@@ -150,10 +154,28 @@ class Handler(BaseHTTPRequestHandler):
                 STATE['learn']['la'] = False
             self.send_json({**STATE['learn'], 'tg': float(q.get('s0', 42.0))})
         elif url.path == '/rest/profile_config':
+            pf = int(q.get('pf', STATE['selected']))
+            if not as_bool(q.get('ro', 'false')):
+                STATE['selected'] = pf
+                STATE['config']['pf'] = pf
+                STATE['config']['pn'] = NAMES[pf]
             for key in PROFILE:
-                if key in q and key != 'pf':
+                if key in q and key not in ('pf', 'p2'):
                     PROFILE[key] = float(q[key])
-            self.send_json(PROFILE)
+            self.send_json({**PROFILE, 'pf': pf, 'p2': NAMES[pf]})
+        elif url.path == '/__state':
+            self.send_json({'taps': STATE['taps'], 'selected': STATE['selected'], 'names': NAMES,
+                            'learn': STATE['learn']})
+        elif url.path == '/rest/profile_new':
+            slot = int(q['slot']) if 'slot' in q else next((i for i, n in enumerate(NAMES) if n == f'Profile{i}'), -1)
+            if slot < 0:
+                self.send_json({'pf': -1, 'err': 'No free profile slot'})
+            else:
+                NAMES[slot] = q.get('n', '')
+                STATE['selected'] = slot
+                STATE['config']['pf'] = slot
+                STATE['config']['pn'] = NAMES[slot]
+                self.send_json({'pf': slot, 'err': ''})
         elif url.path in ('/rest/coarse_motor_config', '/rest/fine_motor_config'):
             self.send_json({'m0': 5000.0, 'm1': 200, 'm2': 500, 'm3': 256,
                             'm4': 20 if 'coarse' in url.path else 6, 'm5': 110, 'm6': 0.02, 'm7': 1.0,
@@ -163,7 +185,9 @@ class Handler(BaseHTTPRequestHandler):
                 SERVO['c0'] = as_bool(q['c0'])
             self.send_json(SERVO)
         elif url.path == '/rest/charge_mode_state':
-            self.send_json({'s0': 42.0, 's1': 12.3, 's2': 0, 's3': 1, 's4': EXPORT['model']['pn'], 's5': '9.80'})
+            if 'tap' in q:
+                STATE['taps'] += int(q['tap'])
+            self.send_json({'s0': 42.0, 's1': 12.3, 's2': 3, 's3': 1, 's4': NAMES[STATE['selected']], 's5': '9.80', 's6': True})
         elif url.path == '/rest/charge_mode_config':
             for key in CHARGE_MODE:
                 if key in q:
@@ -202,7 +226,7 @@ class Handler(BaseHTTPRequestHandler):
                             'min': -0.04, 'max': 0.04, 'jump': 0.04, 'res': 0.02})
             self.send_json(out)
         elif url.path == '/rest/profile_summary':
-            self.send_json({'s0': {str(i): (EXPORT['model']['pn'] if i == 0 else f'Profile{i}') for i in range(8)}, 's1': 0})
+            self.send_json({'s0': {str(i): NAMES[i] for i in range(8)}, 's1': STATE['selected']})
         elif url.path == '/rest/fw_info':
             fw = STATE['fw']
             if fw['st'] == 'rebooting':

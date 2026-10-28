@@ -137,6 +137,15 @@
         <div class="card-body p-4">
             <h2 class="card-title" data-i18n="learn">Profil einlernen</h2>
             <p class="text-sm opacity-80" data-i18n="learnHelp">-</p>
+            <label class="form-control">
+                <div class="label"><span class="label-text" data-i18n="learnInto">In welches Profil lernen?</span></div>
+                <select id="learnTarget" class="select select-bordered select-sm" onchange="onLearnTargetChange()"></select>
+            </label>
+            <label id="learnNewNameRow" class="form-control hidden">
+                <div class="label"><span class="label-text" data-i18n="learnNewName">Name des neuen Profils (z. B. Pulver)</span></div>
+                <input id="learnNewName" type="text" maxlength="15" class="input input-bordered input-sm" />
+            </label>
+            <div id="learnTargetHint" class="text-xs opacity-80"></div>
             <div class="grid grid-cols-2 gap-2">
                 <label class="form-control">
                     <div class="label"><span class="label-text" data-i18n="chargeWeight">Ladung (gr)</span></div>
@@ -314,6 +323,12 @@ const I18N = {
         autoSpeedInfo: "Gelerntes Tempo {speed} für dieses Profil · Überwürfe {over} % · Nachtrickeln {topups}/Wurf · bestes Tempo {best} ({bestTime})", fineMax: "Fein max (U/s)", coarseMin: "Grob min (U/s)", fineMin: "Fein min (U/s)",
         adaptive: "Adaptiver Regler", autoLearn: "Ständig weiterlernen", save: "Speichern",
         learn: "Profil einlernen",
+        learnInto: "In welches Profil lernen?", learnNewName: "Name des neuen Profils (z. B. Pulver)",
+        learnCurrent: "aktuell", learnNew: "+ Neues Profil (Einstellungen vom aktuellen übernehmen)",
+        learnHasModel: "Dieses Profil hat schon ein gelerntes Modell ({n} Würfe). Ein anderes Pulver hier einzulernen überschreibt es.",
+        learnConfirmOverwrite: "Profil \"{name}\" hat schon ein gelerntes Modell ({n} Würfe). Wirklich dasselbe Pulver weiterlernen? Bei einem anderen Pulver besser ein neues Profil anlegen.",
+        learnNeedName: "Bitte einen Namen für das neue Profil eingeben.",
+        learnNoSlot: "Alle 8 Profile sind belegt. Unter Settings → Profiles ein Profil überschreiben.",
         learnHelp: "Der Trickler wirft Probe-Pulse und mehrere Ladungen, misst dabei Fördermenge, Fallzeit, Nachlauf und Streuung und stellt sich selbst ein. Leere die Waagschale nach jedem Wurf.",
         chargeWeight: "Ladung (gr)", throws: "Würfe", stop: "Stopp", startLearning: "Lernen starten",
         lastThrowChart: "Letzter Wurf", measured: "Gemessen", modelCurve: "Modell (Mittelwerte)", target: "Ziel", coarseStop: "Grob-Stopp",
@@ -354,6 +369,12 @@ const I18N = {
         autoSpeedInfo: "Learned speed {speed} for this profile · over charges {over} % · top ups {topups}/charge · best speed {best} ({bestTime})", fineMax: "Fine max (rev/s)", coarseMin: "Coarse min (rev/s)", fineMin: "Fine min (rev/s)",
         adaptive: "Adaptive controller", autoLearn: "Keep learning", save: "Save",
         learn: "Learn profile",
+        learnInto: "Learn into which profile?", learnNewName: "Name of the new profile (e.g. powder)",
+        learnCurrent: "current", learnNew: "+ New profile (settings taken from the current one)",
+        learnHasModel: "This profile already has a learned model ({n} throws). Learning a different powder here overwrites it.",
+        learnConfirmOverwrite: "Profile \"{name}\" already has a learned model ({n} throws). Really keep learning the same powder? For a different powder better create a new profile.",
+        learnNeedName: "Please enter a name for the new profile.",
+        learnNoSlot: "All 8 profiles are in use. Overwrite one under Settings → Profiles.",
         learnHelp: "The trickler throws probe pulses and several charges, measures flow per revolution, flight time, tail and spread, and tunes itself. Empty the pan after each throw.",
         chargeWeight: "Charge (gr)", throws: "Throws", stop: "Stop", startLearning: "Start learning",
         lastThrowChart: "Last throw", measured: "Measured", modelCurve: "Model (average)", target: "Target", coarseStop: "Coarse stop",
@@ -658,11 +679,51 @@ async function startLearning() {
         return;
     }
     try {
+        // The profile to learn into is chosen first and stays selected afterwards
+        const target = document.getElementById("learnTarget").value;
+        if (target === "new") {
+            const name = document.getElementById("learnNewName").value.trim();
+            if (!name) {
+                toast(t("learnNeedName"), "error");
+                return;
+            }
+            const created = await getJson(`/rest/profile_new?n=${encodeURIComponent(name)}&ee=true`);
+            if (created.err) {
+                toast(created.err === "No free profile slot" ? t("learnNoSlot") : created.err, "error");
+                return;
+            }
+            document.getElementById("learnNewName").value = "";
+            document.getElementById("learnTarget").value = "";
+        }
+        else {
+            const pf = Number(target);
+            const model = await getJson(`/rest/ai_model?pf=${pf}`);
+            if (model.n > 0 && !confirm(t("learnConfirmOverwrite", {name: model.pn, n: model.n}))) {
+                return;
+            }
+            if (!state.config || pf !== state.config.pf) {
+                await getJson(`/rest/profile_config?pf=${pf}`);
+            }
+        }
         await getJson(`/rest/ai_config?a3=${throws}&ee=true`);
         await getJson(`/rest/ai_learn?s0=${encodeURIComponent(weight)}&n=${throws}&go=true`);
+        await refreshConfig();
+        await refreshProfiles();
         toast(t("saved"));
     } catch (e) {
         toast(t("failed"), "error");
+    }
+}
+
+function onLearnTargetChange() {
+    const target = document.getElementById("learnTarget").value;
+    document.getElementById("learnNewNameRow").classList.toggle("hidden", target !== "new");
+    const hint = document.getElementById("learnTargetHint");
+    hint.textContent = "";
+    if (target !== "new") {
+        getJson(`/rest/ai_model?pf=${target}`).then(m => {
+            hint.textContent = m.n > 0 ? t("learnHasModel", {n: m.n}) : "";
+        }).catch(() => {});
     }
 }
 
@@ -1559,6 +1620,14 @@ async function refreshProfiles() {
         select.innerHTML = `<option value="" disabled selected>${t("copyFrom")}</option>` +
             Object.keys(summary.s0).filter(i => Number(i) !== current)
                 .map(i => `<option value="${i}">${summary.s0[i]}</option>`).join("");
+
+        const target = document.getElementById("learnTarget");
+        const previous = target.value;
+        target.innerHTML = Object.keys(summary.s0)
+            .map(i => `<option value="${i}">#${i} ${summary.s0[i]}${Number(i) === current ? " (" + t("learnCurrent") + ")" : ""}</option>`).join("") +
+            `<option value="new">${t("learnNew")}</option>`;
+        target.value = previous && [...target.options].some(o => o.value === previous) ? previous : String(current);
+        onLearnTargetChange();
     } catch (e) {
         console.warn(e);
     }

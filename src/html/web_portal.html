@@ -70,8 +70,10 @@
                     <input id="chargeWeightInput" type="number" step="0.001" placeholder="Charge Weight" class="input input-bordered input-primary" pattern="[0-9]+([\.,][0-9]+)?"/>
 
                     <!-- Row 4 -->
-                    <div class="grid grid-cols-2 gap-2">
+                    <div class="grid grid-cols-3 gap-2">
                         <button id="confirmButton" class="btn btn-primary btn-lg" onclick="setChargeWeight()">Start</button>
+                        <!-- Tap: one small turn of the fine trickler, after a charge while the cup is still on the scale -->
+                        <button id="tapButton" class="btn btn-secondary btn-lg" onclick="tapFineTrickler()" disabled="disabled" title="Turn the fine trickler by the tap angle (Settings - AI Trickle)">Tap</button>
                         <button id="stopButton" class="btn btn-warning btn-lg" onclick="enterChargeMode(false)" disabled="disabled">Stop</button>
                     </div>
                 </div>
@@ -233,7 +235,10 @@
                                     <option value="7">#7</option>
                                 </select>
 
-                                <button class="btn btn-neutral system-control-export-btn" onclick="onExportProfileBtnClicked(event)">Export Profile</button>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <button class="btn btn-neutral system-control-export-btn" onclick="onExportProfileBtnClicked(event)">Export Profile</button>
+                                    <button class="btn btn-neutral" onclick="onNewProfileClicked(event)">New Profile</button>
+                                </div>
                             </div>
 
                             <div class="divider"></div>
@@ -439,6 +444,12 @@
                             <div class="grid grid-cols-1 gap-1">
                                 <span class="label-text">Speed in Use for the Current Profile</span>
                                 <input type="text" class="input input-bordered" name="sp" disabled="disabled" readonly>
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Tap Angle of the Fine Trickler (degrees)</span>
+                                <input type="number" class="input input-bordered" name="a7" step="1" min="1" max="180">
+                                <span id="aiTapInfo" class="text-sm opacity-80"></span>
                             </div>
 
                             <div class="grid grid-cols-1 gap-1">
@@ -1264,6 +1275,7 @@
             const charge_mode_event = data["s3"];
             const profile_name = data["s4"];
             const charge_time_seconds = data["s5"] || "-.--";
+            document.getElementById("tapButton").disabled = !data["s6"];
 
             var percentage = 0;
             if (charge_weight_set_point == 0) {
@@ -1568,6 +1580,9 @@
         if (sectionId == "settings-ai-trickle") {
             renderAiLimits();
         }
+        if (sectionId == "settings-profile") {
+            renderProfileNames();
+        }
 
         // Populate values
         const form = targetSection.querySelector("form");
@@ -1819,14 +1834,14 @@
             "/rest/mini_12864_config",
             "/rest/wireless_config",
             "/rest/neopixel_led_config",
-            "/rest/profile_config?pf=0",
-            "/rest/profile_config?pf=1",
-            "/rest/profile_config?pf=2",
-            "/rest/profile_config?pf=3",
-            "/rest/profile_config?pf=4",
-            "/rest/profile_config?pf=5",
-            "/rest/profile_config?pf=6",
-            "/rest/profile_config?pf=7",
+            "/rest/profile_config?pf=0&ro=true",
+            "/rest/profile_config?pf=1&ro=true",
+            "/rest/profile_config?pf=2&ro=true",
+            "/rest/profile_config?pf=3&ro=true",
+            "/rest/profile_config?pf=4&ro=true",
+            "/rest/profile_config?pf=5&ro=true",
+            "/rest/profile_config?pf=6&ro=true",
+            "/rest/profile_config?pf=7&ro=true",
             "/rest/servo_gate_config",
             "/rest/ai_config",
         ]
@@ -1886,6 +1901,10 @@
                         for (const [key, value] of Object.entries(config_data)) {
                             paramData.append(key, value);
                         }
+                        // Restore every profile without switching the selected one
+                        if (endpoint.startsWith("/rest/profile_config")) {
+                            paramData.append("ro", "true");
+                        }
 
                         // Create URI
                         const queryString = new URLSearchParams(paramData).toString();
@@ -1918,6 +1937,64 @@
             reader.readAsText(file);
         }
         input.click();
+    }
+
+    // Profile list with names instead of bare numbers
+    async function renderProfileNames() {
+        try {
+            const summary = await getJson("/rest/profile_summary");
+            const select = document.getElementById("select_profile_option");
+            for (const option of select.options) {
+                const name = summary.s0[option.value];
+                option.textContent = `#${option.value} ${name || ""}`;
+            }
+        } catch (e) {
+            console.warn(e);
+        }
+    }
+
+    // New profile: copy the shown profile into a free slot under a new name
+    async function onNewProfileClicked(event) {
+        event.preventDefault();
+        const source = document.getElementById("select_profile_option").value;
+        const name = (prompt("Name of the new profile (e.g. powder name):") || "").trim().substring(0, 15);
+        if (!name) {
+            return;
+        }
+        let result;
+        try {
+            result = await getJson(`/rest/profile_new?n=${encodeURIComponent(name)}&from=${source}&ee=true`);
+        } catch (e) {
+            alert("Failed");
+            return;
+        }
+        if (result.err === "No free profile slot") {
+            const slot = prompt("All 8 profiles are in use. Number (0-7) of the profile to overwrite:");
+            if (slot === null || slot === "" || !(Number(slot) >= 0 && Number(slot) <= 7)) {
+                return;
+            }
+            if (!confirm(`Overwrite profile #${slot}? Its settings and learned AI model are lost.`)) {
+                return;
+            }
+            result = await getJson(`/rest/profile_new?n=${encodeURIComponent(name)}&from=${source}&slot=${slot}&ee=true`);
+        }
+        if (result.err) {
+            alert(result.err);
+            return;
+        }
+        const select = document.getElementById("select_profile_option");
+        select.value = String(result.pf);
+        populateProfileSelection(select);
+        renderProfileNames();
+    }
+
+    // Tap: the charge loop turns the fine trickler once per request
+    async function tapFineTrickler() {
+        try {
+            await getJson("/rest/charge_mode_state?tap=1");
+        } catch (e) {
+            console.warn(e);
+        }
     }
 
     // Options that depend on other settings: servo gate controls, cleanup
@@ -1991,6 +2068,9 @@
             const notes = [];
             if (c.lim[1] < c.pmx[0] - 0.001) notes.push(`the coarse motor max speed (${c.lim[1]}) caps the profile value (${c.pmx[0]})`);
             if (c.lim[3] < c.pmx[1] - 0.001) notes.push(`the fine motor max speed (${c.lim[3]}) caps the profile value (${c.pmx[1]})`);
+            document.getElementById("aiTapInfo").textContent = c.tg1 > 0 ?
+                `≈ ${Number(c.tg1).toFixed(3)} gr per tap with the learned model of ${c.pn}. The Tap button works after a charge while the cup is still on the scale.` :
+                "The Tap button works after a charge while the cup is still on the scale.";
             info.innerHTML =
                 `Profile <b>${c.pn}</b>: coarse ${c.lim[0]} … <b>${c.lim[1]}</b> rev/s, fine ${c.lim[2]} … <b>${c.lim[3]}</b> rev/s, ` +
                 `motor ramps ${c.acc[0]} / ${c.acc[1]} rev/s²` +

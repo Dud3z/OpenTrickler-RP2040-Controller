@@ -3,6 +3,11 @@
 #include "profile.h"
 #include "eeprom.h"
 #include "common.h"
+#include "ai_trickle.h"
+#include "charge_mode.h"
+
+
+extern charge_mode_config_t charge_mode_config;
 
 
 eeprom_profile_data_t profile_data;
@@ -157,15 +162,21 @@ bool http_rest_profile_config(struct fs_file *file, int num_params, char *params
     // p11 (float): fine_min_flow_speed_rps
     // p12 (float): fine_max_flow_speed_rps
     // ee (bool): save to eeprom
+    // ro (bool): read or write the profile given by pf without selecting it
+    //            (export / import / other pages); without it pf selects the profile
     static char buf[256];
 
     // Read the current loaded profile index
     uint8_t profile_idx = profile_get_selected_idx();
+    bool keep_selection = false;
 
     // Overwrite the profile index (if applicable)
     for (int idx = 0; idx < num_params; idx += 1) {
         if (strcmp(params[idx], "pf") == 0) {
-            profile_idx = (uint16_t) atoi(values[0]);
+            profile_idx = (uint16_t) atoi(values[idx]);
+        }
+        else if (strcmp(params[idx], "ro") == 0) {
+            keep_selection = string_to_boolean(values[idx]);
         }
     }
 
@@ -174,7 +185,7 @@ bool http_rest_profile_config(struct fs_file *file, int num_params, char *params
     }
 
     else {
-        profile_t * current_profile = profile_select(profile_idx);
+        profile_t * current_profile = keep_selection ? &profile_data.profiles[profile_idx] : profile_select(profile_idx);
         bool save_to_eeprom = false;
 
         // Control
@@ -248,6 +259,103 @@ bool http_rest_profile_config(struct fs_file *file, int num_params, char *params
                  current_profile->fine_min_flow_speed_rps,
                  current_profile->fine_max_flow_speed_rps);
     }
+
+    size_t response_len = strlen(buf);
+    file->data = buf;
+    file->len = response_len;
+    file->index = response_len;
+    file->flags = FS_FILE_FLAGS_HEADER_INCLUDED;
+
+    return true;
+}
+
+
+// A slot is free when it still holds an unused default profile
+static bool profile_slot_is_free(uint8_t idx) {
+    const profile_t * profile = &profile_data.profiles[idx];
+    if (profile->name[0] == '\0') {
+        return true;
+    }
+    char default_name[PROFILE_NAME_MAX_LEN];
+    snprintf(default_name, sizeof(default_name), "Profile%d", idx);
+    return strncmp(profile->name, default_name, PROFILE_NAME_MAX_LEN) == 0 &&
+           profile->coarse_max_flow_speed_rps <= 0.0f && profile->fine_max_flow_speed_rps <= 0.0f;
+}
+
+
+bool http_rest_profile_new(struct fs_file *file, int num_params, char *params[], char *values[]) {
+    // Create a profile from an existing one, e.g. before learning a new powder
+    // Mappings
+    // n (str): name of the new profile
+    // from (int): profile to copy the settings from, default the selected one
+    // slot (int): slot to use, default the first free one; an occupied slot is overwritten
+    // ee (bool): save to eeprom
+    // Response: {"pf": new index or -1, "err": ""}, the new profile is selected
+    static char buf[160];
+    const char * name = NULL;
+    int from = profile_get_selected_idx();
+    int slot = -1;
+    bool save_to_eeprom = false;
+    const char * error = "";
+
+    for (int idx = 0; idx < num_params; idx += 1) {
+        if (strcmp(params[idx], "n") == 0) {
+            name = values[idx];
+        }
+        else if (strcmp(params[idx], "from") == 0) {
+            from = atoi(values[idx]);
+        }
+        else if (strcmp(params[idx], "slot") == 0) {
+            slot = atoi(values[idx]);
+        }
+        else if (strcmp(params[idx], "ee") == 0) {
+            save_to_eeprom = string_to_boolean(values[idx]);
+        }
+    }
+
+    if (slot < 0) {
+        for (uint8_t idx = 0; idx < MAX_PROFILE_CNT; idx += 1) {
+            if (profile_slot_is_free(idx)) {
+                slot = idx;
+                break;
+            }
+        }
+    }
+
+    if (charge_mode_config.charge_mode_state != CHARGE_MODE_EXIT) {
+        error = "Leave charge mode first";
+        slot = -1;
+    }
+    else if (name == NULL || name[0] == '\0') {
+        error = "Name missing";
+        slot = -1;
+    }
+    else if (from < 0 || from >= MAX_PROFILE_CNT) {
+        error = "Invalid source profile";
+        slot = -1;
+    }
+    else if (slot < 0 || slot >= MAX_PROFILE_CNT) {
+        error = "No free profile slot";
+        slot = -1;
+    }
+    else {
+        if (slot != from) {
+            profile_data.profiles[slot] = profile_data.profiles[from];
+        }
+        memset(profile_data.profiles[slot].name, 0x0, PROFILE_NAME_MAX_LEN);
+        strncpy(profile_data.profiles[slot].name, name, PROFILE_NAME_MAX_LEN - 1);
+        profile_select((uint8_t) slot);
+
+        // A new powder starts with a fresh AI model
+        ai_trickle_profile_reset((uint8_t) slot);
+
+        if (save_to_eeprom) {
+            profile_data_save();
+            ai_trickle_config_save();
+        }
+    }
+
+    snprintf(buf, sizeof(buf), "%s{\"pf\":%d,\"err\":\"%s\"}", http_json_header, slot, error);
 
     size_t response_len = strlen(buf);
     file->data = buf;

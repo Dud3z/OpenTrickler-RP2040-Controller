@@ -74,6 +74,33 @@ static bool last_charge_adaptive = false;
 static bool coarse_backoff_in_progress = false;
 static TickType_t coarse_backoff_end_tick = 0;
 
+// Tap: turn the fine trickler by a small angle to add a kernel by hand
+#define CHARGE_MODE_TAP_SPEED_RPS       1.0f    // Slow enough for single kernels, fast enough to be precise in time
+#define CHARGE_MODE_TAP_SETTLE_MS       1500    // Wait for the kernels to land before judging again
+#define CHARGE_MODE_TAP_MAX_QUEUE       5
+static volatile uint8_t tap_requests = 0;
+static volatile bool tap_allowed = false;
+
+static void charge_mode_get_trickler_limits(trickle_motor_limits_t * limits);
+
+static void charge_mode_tap_fine_trickler() {
+    float degrees = ai_trickle_tap_degrees();
+
+    // Stay within what the motor and the profile allow
+    trickle_motor_limits_t limits;
+    charge_mode_get_trickler_limits(&limits);
+    float speed = fminf(fmaxf(CHARGE_MODE_TAP_SPEED_RPS, limits.fine_min_rps), limits.fine_max_rps);
+
+    uint32_t duration_ms = (uint32_t) (degrees / 360.0f / speed * 1000.0f);
+    if (duration_ms < 1) {
+        duration_ms = 1;
+    }
+
+    motor_set_speed(SELECT_FINE_TRICKLER_MOTOR, speed);
+    vTaskDelay(pdMS_TO_TICKS(duration_ms));
+    motor_set_speed(SELECT_FINE_TRICKLER_MOTOR, 0);
+}
+
 static void coarse_trickler_backoff(float min_output_speed_rps) {
     if (!charge_mode_config.eeprom_charge_mode_data.coarse_stop_backoff_enable) {
         return;
@@ -660,48 +687,14 @@ void charge_mode_wait_for_complete() {
     charge_mode_finish_charge();
 }
 
-void charge_mode_wait_for_cup_removal() {
-    // Update current status
-    snprintf(title_string, sizeof(title_string), "Remove Cup");
-
-    FloatRingBuffer data_buffer(5);
-
-    // Post charge analysis (while waiting for removal of the cup)
-    if (last_charge_adaptive) {
-        vTaskDelay(pdMS_TO_TICKS(1000));  // Wait for other tasks to complete
-    }
-    else {
-        // Same wait, but keep recording so the AI model sees the powder settle
-        TickType_t settle_start_tick = xTaskGetTickCount();
-        while (xTaskGetTickCount() - settle_start_tick < pdMS_TO_TICKS(1000)) {
-            float settle_weight;
-            if (scale_block_wait_for_next_measurement(200, &settle_weight)) {
-                ai_trickle_classic_sample(charge_elapsed_s(xTaskGetTickCount()), settle_weight, 0.0f, 0.0f);
-            }
-        }
-    }
-
-    // Take current measurement
-    float current_measurement = scale_get_current_measurement();
+// Over / under / OK of the charge on the status line, LEDs and REST event
+static void charge_mode_show_result(float current_measurement) {
     float error = charge_mode_config.target_charge_weight - current_measurement;
 
     float threshold = charge_mode_config.eeprom_charge_mode_data.fine_stop_threshold;
     if (last_charge_adaptive) {
-        // Green means within the tolerance of the selected precision level
+        // Green means within the AI tolerance
         threshold = ai_trickle_tolerance() + 0.001f;
-
-        if (ai_trickle_learn_just_finished()) {
-            snprintf(title_string, sizeof(title_string), "Learned! Remove Cup");
-        }
-    }
-    else {
-        ai_trickle_classic_end(charge_mode_config.target_charge_weight, current_measurement, last_charge_elapsed_seconds);
-    }
-
-    // A finished series or ladder leaves charge mode once the cup is removed
-    bool series_finished = ai_trickle_series_just_finished();
-    if (series_finished) {
-        snprintf(title_string, sizeof(title_string), "Done! Remove Cup");
     }
 
     // Result on its own line, the title is too short for it next to the timer
@@ -752,6 +745,57 @@ void charge_mode_wait_for_cup_removal() {
         charge_mode_config.charge_mode_event &= ~(CHARGE_MODE_EVENT_UNDER_CHARGE | CHARGE_MODE_EVENT_OVER_CHARGE);
     }
 
+}
+
+
+void charge_mode_wait_for_cup_removal() {
+    // Update current status
+    snprintf(title_string, sizeof(title_string), "Remove Cup");
+
+    FloatRingBuffer data_buffer(5);
+
+    // Post charge analysis (while waiting for removal of the cup)
+    if (last_charge_adaptive) {
+        vTaskDelay(pdMS_TO_TICKS(1000));  // Wait for other tasks to complete
+    }
+    else {
+        // Same wait, but keep recording so the AI model sees the powder settle
+        TickType_t settle_start_tick = xTaskGetTickCount();
+        while (xTaskGetTickCount() - settle_start_tick < pdMS_TO_TICKS(1000)) {
+            float settle_weight;
+            if (scale_block_wait_for_next_measurement(200, &settle_weight)) {
+                ai_trickle_classic_sample(charge_elapsed_s(xTaskGetTickCount()), settle_weight, 0.0f, 0.0f);
+            }
+        }
+    }
+
+    // Take current measurement
+    float current_measurement = scale_get_current_measurement();
+
+    if (last_charge_adaptive) {
+        if (ai_trickle_learn_just_finished()) {
+            snprintf(title_string, sizeof(title_string), "Learned! Remove Cup");
+        }
+    }
+    else {
+        ai_trickle_classic_end(charge_mode_config.target_charge_weight, current_measurement, last_charge_elapsed_seconds);
+    }
+
+    // A finished series or ladder leaves charge mode once the cup is removed
+    bool series_finished = ai_trickle_series_just_finished();
+    if (series_finished) {
+        snprintf(title_string, sizeof(title_string), "Done! Remove Cup");
+    }
+
+    charge_mode_show_result(current_measurement);
+
+    // Taps requested from the web page are carried out while the cup is still
+    // on the scale; the result is judged again once the kernels landed
+    tap_requests = 0;
+    tap_allowed = true;
+    TickType_t tap_judge_tick = 0;
+    bool tap_judge_pending = false;
+
     // Stop condition: 5 stable measurements in 300ms apart (1.5 seconds minimum)
     while (true) {
         TickType_t last_sample_tick = xTaskGetTickCount();
@@ -759,8 +803,23 @@ void charge_mode_wait_for_cup_removal() {
         // Non block waiting for the input
         ButtonEncoderEvent_t button_encoder_event = button_wait_for_input(false);
         if (button_encoder_event == BUTTON_RST_PRESSED) {
+            tap_allowed = false;
             charge_mode_config.charge_mode_state = CHARGE_MODE_EXIT;
             return;
+        }
+
+        if (tap_requests > 0) {
+            tap_requests -= 1;
+            charge_mode_tap_fine_trickler();
+            snprintf(status_string, sizeof(status_string), "Tap...");
+            tap_judge_tick = xTaskGetTickCount() + pdMS_TO_TICKS(CHARGE_MODE_TAP_SETTLE_MS);
+            tap_judge_pending = true;
+            data_buffer.reset();
+            continue;
+        }
+        if (tap_judge_pending && xTaskGetTickCount() >= tap_judge_tick) {
+            tap_judge_pending = false;
+            charge_mode_show_result(scale_get_current_measurement());
         }
 
         // Perform measurement
@@ -782,6 +841,8 @@ void charge_mode_wait_for_cup_removal() {
         // Wait for next measurement
         vTaskDelayUntil(&last_sample_tick, pdMS_TO_TICKS(300));
     }
+
+    tap_allowed = false;
 
     // Reset LED to default colour
     neopixel_led_set_colour(neopixel_led_config.eeprom_neopixel_led_metadata.default_led_colours.mini12864_backlight_colour,
@@ -1075,8 +1136,10 @@ bool http_rest_charge_mode_state(struct fs_file *file, int num_params, char *par
     // s3 (uint32_t): Charge mode event
     // s4 (string): Profile Name
     // s5 (string): Elapsed time in seconds, live during charging
+    // s6 (bool): a tap is possible now (charge done, cup still on the scale)
+    // tap (int): turn the fine trickler by the tap angle this many times
 
-    static char charge_mode_json_buffer[160];  // Increased to fit s5
+    static char charge_mode_json_buffer[176];  // Increased to fit s5 and s6
     char elapsed_time_buffer[16] = {0};
 
     // Control
@@ -1103,6 +1166,12 @@ bool http_rest_charge_mode_state(struct fs_file *file, int num_params, char *par
             }
 
             charge_mode_config.charge_mode_state = new_state;
+        }
+        else if (strcmp(params[idx], "tap") == 0 && tap_allowed) {
+            int taps = atoi(values[idx]);
+            if (taps > 0 && tap_requests + taps <= CHARGE_MODE_TAP_MAX_QUEUE) {
+                tap_requests += (uint8_t) taps;
+            }
         }
     }
 
@@ -1132,14 +1201,15 @@ bool http_rest_charge_mode_state(struct fs_file *file, int num_params, char *par
     snprintf(charge_mode_json_buffer, 
              sizeof(charge_mode_json_buffer),
              "%s"
-             "{\"s0\":%0.3f,\"s1\":%s,\"s2\":%d,\"s3\":%lu,\"s4\":\"%s\",\"s5\":\"%s\"}",
+             "{\"s0\":%0.3f,\"s1\":%s,\"s2\":%d,\"s3\":%lu,\"s4\":\"%s\",\"s5\":\"%s\",\"s6\":%s}",
              http_json_header,
              charge_mode_config.target_charge_weight,
              weight_string,
              (int) charge_mode_config.charge_mode_state,
              charge_mode_config.charge_mode_event,
              profile_get_selected()->name,
-             elapsed_time_buffer);
+             elapsed_time_buffer,
+             boolean_to_string(tap_allowed));
 
     // Clear events
     charge_mode_config.charge_mode_event = 0;

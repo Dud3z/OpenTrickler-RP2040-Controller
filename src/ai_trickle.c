@@ -154,6 +154,7 @@ bool ai_trickle_init(void) {
         printf("Migrating AI trickle configuration\n");
         ai_trickle_data.tolerance_gr = trickle_default_tolerance(ai_trickle_data.precision_level);
         ai_trickle_data.auto_speed = 0;
+        ai_trickle_data.tap_degrees = 0;
         memset(ai_trickle_data.reserved2, 0x0, sizeof(ai_trickle_data.reserved2));
         if (ai_trickle_data.mode_preset == AI_PRESET_AUTO) {
             // Rev 1 had Custom at this position
@@ -191,6 +192,9 @@ bool ai_trickle_init(void) {
         ai_trickle_data.mode_preset = AI_PRESET_CUSTOM;
     }
     ai_trickle_data.auto_speed = ai_trickle_data.auto_speed ? 1 : 0;
+    if (ai_trickle_data.tap_degrees > 180) {
+        ai_trickle_data.tap_degrees = 0;
+    }
     ai_trickle_menu_sync();
     if (ai_trickle_data.learn_throws < 2 || ai_trickle_data.learn_throws > AI_TRICKLE_MAX_LEARN_THROWS) {
         ai_trickle_data.learn_throws = AI_TRICKLE_DEFAULT_LEARN_THROWS;
@@ -243,6 +247,11 @@ float ai_trickle_tolerance(void) {
 
 uint8_t ai_trickle_speed(void) {
     return speed_for_profile(selected_profile_idx());
+}
+
+
+float ai_trickle_tap_degrees(void) {
+    return ai_trickle_data.tap_degrees ? ai_trickle_data.tap_degrees : AI_TAP_DEFAULT_DEGREES;
 }
 
 
@@ -707,11 +716,18 @@ void ai_trickle_menu_sync(void) {
 }
 
 
-uint8_t ai_trickle_menu_reset_model(void) {
-    uint8_t idx = selected_profile_idx();
+void ai_trickle_profile_reset(uint8_t idx) {
+    if (idx >= MAX_PROFILE_CNT) {
+        return;
+    }
     trickle_model_reset(&ai_trickle_data.models[idx]);
     reset_speed(idx);
     strncpy(ai_trickle_data.model_names[idx], profile_data.profiles[idx].name, PROFILE_NAME_MAX_LEN);
+}
+
+
+uint8_t ai_trickle_menu_reset_model(void) {
+    ai_trickle_profile_reset(selected_profile_idx());
     ai_trickle_config_save();
     return 70;
 }
@@ -760,6 +776,7 @@ bool http_rest_ai_config(struct fs_file *file, int num_params, char *params[], c
     // a4 (bool): tune the speed of each profile automatically
     // a5 (float): tolerance in grain
     // a6 (int): set the automatic speed of the selected profile (restarts its tuning)
+    // a7 (int): fine trickler angle per tap in degrees (1-180)
     // ee (bool): save to eeprom
     // Read only
     // tol (float): tolerance (same as a5, kept for older pages)
@@ -800,6 +817,12 @@ bool http_rest_ai_config(struct fs_file *file, int num_params, char *params[], c
                 ai_trickle_data.tolerance_gr = tolerance;
             }
         }
+        else if (strcmp(params[idx], "a7") == 0) {
+            int degrees = atoi(values[idx]);
+            if (degrees >= 1 && degrees <= 180) {
+                ai_trickle_data.tap_degrees = (uint8_t) degrees;
+            }
+        }
         else if (strcmp(params[idx], "a6") == 0) {
             int speed = atoi(values[idx]);
             trickle_speed_reset(&ai_trickle_data.speed[pf], (uint8_t) (speed < 0 ? 0 : (speed > 100 ? 100 : speed)));
@@ -838,7 +861,7 @@ bool http_rest_ai_config(struct fs_file *file, int num_params, char *params[], c
 
     snprintf(buf, sizeof(buf),
              "%s"
-             "{\"a0\":%s,\"a1\":%d,\"a2\":%s,\"a3\":%d,\"a4\":%s,\"a5\":%.3f,\"tol\":%.3f,\"sp\":%d,"
+             "{\"a0\":%s,\"a1\":%d,\"a2\":%s,\"a3\":%d,\"a4\":%s,\"a5\":%.3f,\"a7\":%d,\"tg1\":%.4f,\"tol\":%.3f,\"sp\":%d,"
              "\"as\":[%.3f,%.2f,%.1f,%d,%.1f],\"lim\":[%.3f,%.2f,%.3f,%.2f],\"pmx\":[%.2f,%.2f],\"acc\":[%.1f,%.1f],"
              "\"est\":%s,\"tg\":%.3f,\"pf\":%d,\"pn\":\"%s\",\"rd\":%s}",
              http_json_header,
@@ -848,6 +871,8 @@ bool http_rest_ai_config(struct fs_file *file, int num_params, char *params[], c
              ai_trickle_data.learn_throws,
              boolean_to_string(ai_trickle_data.auto_speed),
              ai_trickle_data.tolerance_gr,
+             (int) ai_trickle_tap_degrees(),
+             trickle_model_is_ready(model) ? model->fine_gpr * ai_trickle_tap_degrees() / 360.0f : 0.0f,
              ai_trickle_data.tolerance_gr,
              speed_for_profile(pf),
              speed->over_rate,

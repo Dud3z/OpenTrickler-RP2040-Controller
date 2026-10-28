@@ -33,6 +33,7 @@
 
 #define AI_SERIES_MAX_THROWS                100
 #define AI_LADDER_MAX_STEP_GR               2.0f
+#define AI_TAP_DEFAULT_DEGREES              20
 
 
 typedef enum {
@@ -67,7 +68,8 @@ typedef struct {
     // Since rev 2, a rev 1 block is migrated by ai_trickle_init()
     float tolerance_gr;             // Accepted error of an adaptive charge, independent of the speed
     uint8_t auto_speed;             // Tune the speed of every profile automatically (0/1)
-    uint8_t reserved2[3];
+    uint8_t tap_degrees;            // Angle of the fine trickler per tap, 0 = default (since rev 2, was reserved)
+    uint8_t reserved2[2];
     trickle_speed_state_t speed[MAX_PROFILE_CNT];   // Automatic speed per profile
 } eeprom_ai_trickle_data_t;
 
@@ -96,6 +98,7 @@ bool ai_trickle_config_save(void);
 bool ai_trickle_adaptive_active(void);
 float ai_trickle_tolerance(void);
 uint8_t ai_trickle_speed(void);
+float ai_trickle_tap_degrees(void);
 float ai_trickle_last_error(void);
 
 void ai_trickle_classic_begin(void);
@@ -130,6 +133,7 @@ uint8_t ai_trickle_series_total(void);
 uint8_t ai_trickle_menu_apply_preset(void);
 void ai_trickle_menu_sync(void);
 uint8_t ai_trickle_menu_reset_model(void);
+void ai_trickle_profile_reset(uint8_t idx);
 const trickle_model_t * ai_trickle_selected_model(void);
 
 // REST
