@@ -191,6 +191,16 @@ uint8_t render_ai_learn_next_button(mui_t * ui, uint8_t msg) {
 }
 
 
+// Invisible field of the AI mode form: show the settings of the profile that
+// is selected now (speed, tolerance) when the form opens
+uint8_t ai_mode_form_sync(mui_t *ui, uint8_t msg) {
+    if (msg == MUIF_MSG_FORM_START) {
+        ai_trickle_menu_sync();
+    }
+    return 0;
+}
+
+
 uint8_t render_ai_model_details(mui_t *ui, uint8_t msg) {
     switch(msg)
     {
@@ -337,6 +347,7 @@ muif_t muif_list[] = {
         MUIF_VARIABLE("AE", &ai_trickle_data.enable, mui_u8g2_u8_opt_line_wa_mud_pi),
         MUIF_VARIABLE("AL", &ai_trickle_data.auto_learn, mui_u8g2_u8_opt_line_wa_mud_pi),
         MUIF_RO("AI", render_ai_model_details),
+        MUIF_RO("AY", ai_mode_form_sync),
 
         // Render servo gate state
         MUIF_VARIABLE("RB",&servo_gate.gate_state, render_servo_gate_state_with_action),
@@ -485,6 +496,7 @@ fds_t fds_data[] = {
     MUI_STYLE(1)
     MUI_LABEL(5,10, "AI Mode")
     MUI_XY("HL", 0,13)
+    MUI_AUX("AY")
 
     MUI_STYLE(0)
     MUI_LABEL(5,22, "Speed:")

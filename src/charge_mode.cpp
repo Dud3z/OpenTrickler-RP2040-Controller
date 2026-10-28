@@ -78,6 +78,7 @@ static TickType_t coarse_backoff_end_tick = 0;
 #define CHARGE_MODE_TAP_SPEED_RPS       1.0f    // Slow enough for single kernels, fast enough to be precise in time
 #define CHARGE_MODE_TAP_SETTLE_MS       1500    // Wait for the kernels to land before judging again
 #define CHARGE_MODE_TAP_MAX_QUEUE       5
+#define CHARGE_MODE_FINE_REVERSE_RPS    2.0f    // Speed of the fine tube reverse after a fine stop
 static volatile uint8_t tap_requests = 0;
 static volatile bool tap_allowed = false;
 
@@ -406,6 +407,12 @@ static void charge_mode_wait_for_complete_adaptive() {
     // the controller's own ramp down must not restart it
     bool coarse_stop_hold = false;
 
+    // Fine tube reverse after each fine stop (anti-dribble)
+    float fine_reverse_revs = ai_trickle_fine_reverse_revs();
+    float fine_reverse_rps = fminf(fmaxf(CHARGE_MODE_FINE_REVERSE_RPS, limits.fine_min_rps), limits.fine_max_rps);
+    bool fine_reverse_in_progress = false;
+    TickType_t fine_reverse_end_tick = 0;
+
     while (true) {
         // Non block waiting for the input
         ButtonEncoderEvent_t button_encoder_event = button_wait_for_input(false);
@@ -449,6 +456,19 @@ static void charge_mode_wait_for_complete_adaptive() {
             coarse_trickler_backoff(limits.coarse_min_rps);
         }
 
+        if ((events & TRICKLE_EVENT_FINE_STOPPED) && fine_reverse_revs > 0.0f && fine_reverse_rps > 0.0f) {
+            motor_set_speed(SELECT_FINE_TRICKLER_MOTOR, -fine_reverse_rps);
+            sent_fine_rps = -fine_reverse_rps;
+            fine_reverse_in_progress = true;
+            fine_reverse_end_tick = xTaskGetTickCount() + pdMS_TO_TICKS((uint32_t) (fine_reverse_revs / fine_reverse_rps * 1000.0f));
+        }
+        if (fine_reverse_in_progress && (xTaskGetTickCount() >= fine_reverse_end_tick || fine_rps > 0.0f)) {
+            // Done, or a top up needs the fine tube again
+            motor_set_speed(SELECT_FINE_TRICKLER_MOTOR, 0);
+            sent_fine_rps = 0.0f;
+            fine_reverse_in_progress = false;
+        }
+
         if (coarse_stop_hold && coarse_rps <= 0.0f) {
             coarse_stop_hold = false;
         }
@@ -456,7 +476,7 @@ static void charge_mode_wait_for_complete_adaptive() {
             motor_set_speed(SELECT_COARSE_TRICKLER_MOTOR, coarse_rps);
             sent_coarse_rps = coarse_rps;
         }
-        if (fine_rps != sent_fine_rps) {
+        if (!fine_reverse_in_progress && fine_rps != sent_fine_rps) {
             motor_set_speed(SELECT_FINE_TRICKLER_MOTOR, fine_rps);
             sent_fine_rps = fine_rps;
         }
@@ -472,6 +492,7 @@ static void charge_mode_wait_for_complete_adaptive() {
             sent_coarse_rps = 0.0f;
             sent_fine_rps = 0.0f;
             coarse_stop_hold = false;
+            fine_reverse_in_progress = false;
             coarse_backoff_in_progress = false;
 
             // Most likely the hopper ran empty: wait for the user
@@ -510,6 +531,13 @@ static void charge_mode_wait_for_complete_adaptive() {
         }
 
         if (phase == TRICKLE_PHASE_DONE) {
+            // Let a reverse that just started finish
+            if (fine_reverse_in_progress) {
+                TickType_t now = xTaskGetTickCount();
+                if (fine_reverse_end_tick > now) {
+                    vTaskDelay(fine_reverse_end_tick - now);
+                }
+            }
             break;
         }
     }

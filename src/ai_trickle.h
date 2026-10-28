@@ -17,7 +17,7 @@
 #include "trickle_model.h"
 
 
-#define EEPROM_AI_TRICKLE_DATA_REV          2       // 16 bit
+#define EEPROM_AI_TRICKLE_DATA_REV          3       // 16 bit
 
 #define AI_TRICKLE_HISTORY_LEN              32
 #define AI_TRICKLE_DEFAULT_LEARN_THROWS     8
@@ -34,6 +34,8 @@
 #define AI_SERIES_MAX_THROWS                100
 #define AI_LADDER_MAX_STEP_GR               2.0f
 #define AI_TAP_DEFAULT_DEGREES              20
+#define AI_FINE_REVERSE_DEFAULT_REVS        0.1f
+#define AI_FINE_REVERSE_OFF                 255
 
 
 typedef enum {
@@ -69,8 +71,12 @@ typedef struct {
     float tolerance_gr;             // Accepted error of an adaptive charge, independent of the speed
     uint8_t auto_speed;             // Tune the speed of every profile automatically (0/1)
     uint8_t tap_degrees;            // Angle of the fine trickler per tap, 0 = default (since rev 2, was reserved)
-    uint8_t reserved2[2];
+    uint8_t fine_reverse_centirev;  // Fine tube reverse after each fine stop in 0.01 rev, 0 = default, 255 = off
+    uint8_t reserved2[1];
     trickle_speed_state_t speed[MAX_PROFILE_CNT];   // Automatic speed per profile
+
+    // Since rev 3, a rev 2 block is migrated by ai_trickle_init()
+    float kernel_gr[MAX_PROFILE_CNT];   // Estimated weight of a kernel (or typical clump) per profile, 0 = unknown
 } eeprom_ai_trickle_data_t;
 
 
@@ -99,6 +105,7 @@ bool ai_trickle_adaptive_active(void);
 float ai_trickle_tolerance(void);
 uint8_t ai_trickle_speed(void);
 float ai_trickle_tap_degrees(void);
+float ai_trickle_fine_reverse_revs(void);
 float ai_trickle_last_error(void);
 
 void ai_trickle_classic_begin(void);

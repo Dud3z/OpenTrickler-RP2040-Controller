@@ -950,6 +950,7 @@ trickle_phase_t trickle_ctrl_step(trickle_ctrl_t * ctrl, float t_now, float weig
         return ctrl->phase;
     }
     ctrl->last_weight_gr = weight_gr;
+    bool fine_was_running = ctrl->fine_rps > 0.0f;
 
     switch (ctrl->phase) {
         case TRICKLE_PHASE_COARSE:
@@ -972,6 +973,11 @@ trickle_phase_t trickle_ctrl_step(trickle_ctrl_t * ctrl, float t_now, float weig
             ctrl->coarse_rps = 0.0f;
             ctrl->fine_rps = 0.0f;
             break;
+    }
+
+    if (fine_was_running && ctrl->fine_rps <= 0.0f &&
+        (ctrl->phase == TRICKLE_PHASE_SETTLE || ctrl->phase == TRICKLE_PHASE_DONE)) {
+        ctrl->events |= TRICKLE_EVENT_FINE_STOPPED;
     }
 
     if (!trickle_phase_is_final(ctrl->phase) && t_now - ctrl->t_start > CHARGE_TIMEOUT_S) {
@@ -1526,4 +1532,98 @@ void trickle_model_learn(trickle_model_t * model, const trickle_fit_t * fit,
     }
 
     trickle_model_sanitize(model);
+}
+
+
+// ---------------------------------------------------------------------------
+// Kernel weight
+// ---------------------------------------------------------------------------
+
+/*
+ * Powder arrives in kernels, so over a window in which the fine trickler
+ * delivers D grains, about D / m kernels of weight m land: a Poisson count.
+ * The delivered weight then scatters with a variance of m * D around what the
+ * revolutions predict. Slow flow fluctuation adds (cv * D)^2 and the scale
+ * adds its noise twice (start and end of the window); both are subtracted.
+ * Uses windows of about one second in stretches where only the fine
+ * trickler runs, long enough after the coarse stop.
+ */
+float trickle_estimate_kernel_gr(const trickle_trace_t * trace, const trickle_model_t * model) {
+    const float window_s = 1.0f;
+    const float scale_noise_var = 2.0f * 0.0001f;   // ~0.01 gr noise incl. 0.02 gr resolution, twice
+
+    float coarse_done_t = 0.0f;
+    for (uint8_t i = 0; i < trace->coarse_stop_count; i += 1) {
+        if (trace->coarse_stops[i] > coarse_done_t) {
+            coarse_done_t = trace->coarse_stops[i];
+        }
+    }
+    float start_t = coarse_done_t + model->latency_s + 1.0f;
+
+    double sum_excess = 0.0;
+    double sum_delivered = 0.0;
+    int windows = 0;
+
+    for (uint16_t i = 0; i + 1 < trace->count; i += 1) {
+        const trickle_sample_t * a = &trace->samples[i];
+        if (a->t < start_t) {
+            continue;
+        }
+        // Find the end of a window about window_s later
+        uint16_t j = i + 1;
+        while (j < trace->count && trace->samples[j].t - a->t < window_s) {
+            j += 1;
+        }
+        if (j >= trace->count) {
+            break;
+        }
+        const trickle_sample_t * b = &trace->samples[j];
+
+        // The powder that lands in [a, b] left the tube one latency earlier:
+        // use the revolutions of that earlier window, and require that the
+        // fine trickler ran there, alone and at about the same speed
+        float ta = a->t - model->latency_s;
+        float tb = b->t - model->latency_s;
+        if (ta < start_t - model->latency_s) {
+            continue;
+        }
+        float revs_a = 0.0f, revs_b = 0.0f, coarse_a = 0.0f, coarse_b = 0.0f;
+        bool found_a = false, found_b = false;
+        for (uint16_t k = 0; k < trace->count; k += 1) {
+            if (!found_a && trace->samples[k].t >= ta) {
+                revs_a = trace->samples[k].fine_revs;
+                coarse_a = trace->samples[k].coarse_revs;
+                found_a = true;
+            }
+            if (!found_b && trace->samples[k].t >= tb) {
+                revs_b = trace->samples[k].fine_revs;
+                coarse_b = trace->samples[k].coarse_revs;
+                found_b = true;
+                break;
+            }
+        }
+        if (!found_a || !found_b || fabsf(coarse_b - coarse_a) > 1e-4f) {
+            continue;
+        }
+
+        float expected = model->fine_gpr * (revs_b - revs_a);
+        float delivered = b->weight_gr - a->weight_gr;
+        if (expected < 0.05f || delivered <= 0.0f) {
+            continue;
+        }
+        float residual = delivered - expected;
+        float flow_var = (model->flow_cv * expected) * (model->flow_cv * expected);
+        sum_excess += residual * residual - flow_var - scale_noise_var;
+        sum_delivered += expected;
+        windows += 1;
+
+        // Next window starts where this one ended
+        i = j - 1;
+    }
+
+    if (windows < 3 || sum_delivered <= 0.0) {
+        return NAN;
+    }
+    float m = (float) (sum_excess / sum_delivered);
+    return m > 0.0f ? m : 0.0f;
 }

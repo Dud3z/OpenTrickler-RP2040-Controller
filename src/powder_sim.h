@@ -46,6 +46,7 @@ typedef struct {
     float fall_time_s;          // Mean flight time tube -> pan
     float fall_jitter_s;        // Spread of the flight time
     float coarse_tail_kernels;  // Mean kernels dropping after the coarse stop
+    float fine_tail_kernels;    // Mean kernels dribbling from the fine tube lip after it stops
 } powder_sim_powder_t;
 
 
@@ -90,6 +91,9 @@ typedef struct {
     powder_sim_packet_t queue[POWDER_SIM_QUEUE_LEN];
     uint16_t queue_count;
     float pending_tail_kernels;
+    bool fine_was_running;
+    float pending_fine_tail_kernels;
+    float fine_tail_release_t;
     float tail_release_t;
 
     // Pan and scale

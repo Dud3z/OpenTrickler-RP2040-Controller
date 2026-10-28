@@ -21,6 +21,7 @@ static const powder_sim_powder_t powder_presets[POWDER_SIM_PRESET_COUNT] = {
         .fall_time_s = 0.30f,
         .fall_jitter_s = 0.05f,
         .coarse_tail_kernels = 25.0f,
+        .fine_tail_kernels = 4.0f,
     },
     [POWDER_SIM_SHORT_EXTRUDED] = {
         .name = "Short extruded",
@@ -34,6 +35,7 @@ static const powder_sim_powder_t powder_presets[POWDER_SIM_PRESET_COUNT] = {
         .fall_time_s = 0.38f,
         .fall_jitter_s = 0.08f,
         .coarse_tail_kernels = 20.0f,
+        .fine_tail_kernels = 3.0f,
     },
     [POWDER_SIM_LONG_STICK] = {
         .name = "Long stick",
@@ -47,6 +49,7 @@ static const powder_sim_powder_t powder_presets[POWDER_SIM_PRESET_COUNT] = {
         .fall_time_s = 0.45f,
         .fall_jitter_s = 0.12f,
         .coarse_tail_kernels = 18.0f,
+        .fine_tail_kernels = 2.0f,
     },
     [POWDER_SIM_FLAKE] = {
         .name = "Flake",
@@ -60,6 +63,7 @@ static const powder_sim_powder_t powder_presets[POWDER_SIM_PRESET_COUNT] = {
         .fall_time_s = 0.35f,
         .fall_jitter_s = 0.1f,
         .coarse_tail_kernels = 30.0f,
+        .fine_tail_kernels = 3.0f,
     },
 };
 
@@ -218,6 +222,33 @@ bool powder_sim_step(powder_sim_t * sim, float dt, float * reading_gr) {
     }
     sim->coarse_was_running = coarse_running;
 
+    // A few kernels sitting on the fine tube lip fall after it stops;
+    // turning the fine tube backwards pulls them back in
+    bool fine_running = sim->fine_rps > 0.05f;
+    if (sim->fine_was_running && !fine_running) {
+        sim->pending_fine_tail_kernels = sim->powder.fine_tail_kernels * (0.4f + 1.2f * powder_sim_randu(sim));
+        sim->fine_tail_release_t = sim->t;
+    }
+    sim->fine_was_running = fine_running;
+    if (sim->pending_fine_tail_kernels > 0.0f) {
+        if (sim->fine_rps < 0.0f) {
+            float pulled = 10.0f * (-sim->fine_rps) * dt;
+            sim->pending_fine_tail_kernels *= (pulled < 1.0f) ? (1.0f - pulled) : 0.0f;
+        }
+        float release = sim->pending_fine_tail_kernels * dt / TAIL_RELEASE_S;
+        if (sim->t - sim->fine_tail_release_t > TAIL_RELEASE_S * 3.0f) {
+            release = sim->pending_fine_tail_kernels;
+        }
+        int n = kernel_count(sim, release);
+        if (n > 0) {
+            queue_push(sim, sim->t + fall_time(sim), n * sim->powder.kernel_gr);
+        }
+        sim->pending_fine_tail_kernels -= release;
+        if (sim->pending_fine_tail_kernels < 0.01f) {
+            sim->pending_fine_tail_kernels = 0.0f;
+        }
+    }
+
     if (sim->pending_tail_kernels > 0.0f) {
         // Reversing the coarse trickler pulls the tail back into the tube
         if (sim->coarse_rps < 0.0f) {
@@ -292,6 +323,7 @@ void powder_sim_empty_pan(powder_sim_t * sim) {
     sim->filtered_gr = 0.0f;
     sim->queue_count = 0;
     sim->pending_tail_kernels = 0.0f;
+    sim->pending_fine_tail_kernels = 0.0f;
     for (int i = 0; i < 32; i += 1) {
         sim->delay_line[i] = 0.0f;
     }

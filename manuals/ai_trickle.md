@@ -130,6 +130,12 @@ After a charge, while the cup is still on the scale (display: "Remove Cup"), the
 
 From speed 50 on, a top up starts as soon as the scale shows the charge is clearly short (no full settle first), asks for 80% of the missing powder and is judged after a shorter wait. At low speed the careful strategy stays (70%, full settle). In the strategy sweep (`tests/sim/trickle_bench sweep`, 15/5 rev/s, ±0.02 gr, 23 and 44 gr, ball/short extruded/flake) this brought 13.6 s → 13.1 s per charge with slightly more charges in tolerance. Trains of short top up pulses were also tried: about 2% more charges in tolerance, but 2-5 s slower per charge.
 
+### Fine tube reverse, kernel weight, tolerance per profile
+
+* **Fine tube reverse:** after every fine stop (main stop and each top up) the fine tube turns back by 0.1 revolution by default, so kernels sitting on the tube lip are pulled back instead of dribbling into the pan while the scale settles. Set under *Settings* → **AI Trickle** (0 = off). In the simulator with a few kernels of dribble per stop, this brought the charges within tolerance from 79% back to 91%; without dribble it costs nothing, since it runs while the scale settles anyway.
+* **Kernel weight:** after each charge the trickler estimates the weight of a kernel (or typical clump) from the kernel-by-kernel noise of the fine flow. It is rough: clumpy powders read high, ball powder reads low. If it is heavier than the tolerance, the AI page and the settings warn you: single kernels decide, finish such charges with **Tap** or widen the tolerance.
+* **Tolerance per profile:** the tolerance is stored per profile (web page and display edit the selected profile). Profiles that never set one use the last tolerance set anywhere.
+
 ### How the other settings are used
 
 * **Motor settings:** the max/min speed caps the profile speeds (the lower value wins), the acceleration and gear ratio give the motor ramp. The controller ramps its commands the same way and counts the powder that still comes while a motor slows down. Settings → AI Trickle shows the limits in use and warns when a motor setting caps the profile.

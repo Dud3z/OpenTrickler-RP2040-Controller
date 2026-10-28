@@ -50,8 +50,11 @@ const eeprom_ai_trickle_data_t default_ai_trickle_data = {
     .auto_speed = 1,
 };
 
-// Size of a rev 1 block: everything before the fields added in rev 2
+// Sizes of older blocks: everything before the fields added later
 #define AI_TRICKLE_DATA_V1_SIZE     offsetof(eeprom_ai_trickle_data_t, tolerance_gr)
+#define AI_TRICKLE_DATA_V2_SIZE     offsetof(eeprom_ai_trickle_data_t, kernel_gr)
+
+#define KERNEL_ESTIMATE_GAIN        0.2f
 
 static const uint8_t tolerance_choices[AI_TOLERANCE_CHOICE_COUNT] = AI_TOLERANCE_CHOICES;
 
@@ -130,8 +133,18 @@ static bool read_config_block(void * cfg, size_t size) {
 }
 
 
+// Restart the automatic speed of a profile; its tolerance is a setting, not
+// tuning state, and survives
+static void restart_speed(uint8_t idx, uint8_t speed) {
+    uint8_t tolerance = ai_trickle_data.speed[idx].tolerance_centigr;
+    trickle_speed_reset(&ai_trickle_data.speed[idx], speed);
+    ai_trickle_data.speed[idx].tolerance_centigr = tolerance;
+}
+
+
 static void reset_speed(uint8_t idx) {
     trickle_speed_reset(&ai_trickle_data.speed[idx], ai_trickle_data.precision_level);
+    ai_trickle_data.kernel_gr[idx] = 0.0f;
 }
 
 
@@ -148,6 +161,12 @@ bool ai_trickle_init(void) {
     if (read_config_block(&ai_trickle_data, sizeof(eeprom_ai_trickle_data_t))) {
         is_ok = true;
     }
+    else if (read_config_block(&ai_trickle_data, AI_TRICKLE_DATA_V2_SIZE)) {
+        // Rev 2: everything stays, the kernel estimates start empty
+        printf("Migrating AI trickle configuration from rev 2\n");
+        memset(ai_trickle_data.kernel_gr, 0x0, sizeof(ai_trickle_data.kernel_gr));
+        is_ok = save_config(EEPROM_AI_TRICKLE_BASE_ADDR, &ai_trickle_data, sizeof(eeprom_ai_trickle_data_t));
+    }
     else if (read_config_block(&ai_trickle_data, AI_TRICKLE_DATA_V1_SIZE)) {
         // Rev 1: keep the learned models, add the new settings. The tolerance
         // used to follow the precision level.
@@ -155,7 +174,9 @@ bool ai_trickle_init(void) {
         ai_trickle_data.tolerance_gr = trickle_default_tolerance(ai_trickle_data.precision_level);
         ai_trickle_data.auto_speed = 0;
         ai_trickle_data.tap_degrees = 0;
+        ai_trickle_data.fine_reverse_centirev = 0;
         memset(ai_trickle_data.reserved2, 0x0, sizeof(ai_trickle_data.reserved2));
+        memset(ai_trickle_data.kernel_gr, 0x0, sizeof(ai_trickle_data.kernel_gr));
         if (ai_trickle_data.mode_preset == AI_PRESET_AUTO) {
             // Rev 1 had Custom at this position
             ai_trickle_data.mode_preset = AI_PRESET_CUSTOM;
@@ -194,6 +215,14 @@ bool ai_trickle_init(void) {
     ai_trickle_data.auto_speed = ai_trickle_data.auto_speed ? 1 : 0;
     if (ai_trickle_data.tap_degrees > 180) {
         ai_trickle_data.tap_degrees = 0;
+    }
+    for (int i = 0; i < MAX_PROFILE_CNT; i += 1) {
+        if (!(ai_trickle_data.kernel_gr[i] >= 0.0f && ai_trickle_data.kernel_gr[i] <= 1.0f)) {
+            ai_trickle_data.kernel_gr[i] = 0.0f;
+        }
+    }
+    if (ai_trickle_data.fine_reverse_centirev > 100 && ai_trickle_data.fine_reverse_centirev != AI_FINE_REVERSE_OFF) {
+        ai_trickle_data.fine_reverse_centirev = 0;
     }
     ai_trickle_menu_sync();
     if (ai_trickle_data.learn_throws < 2 || ai_trickle_data.learn_throws > AI_TRICKLE_MAX_LEARN_THROWS) {
@@ -235,18 +264,38 @@ static uint8_t speed_for_profile(uint8_t idx) {
 }
 
 
+// Tolerance of a profile, the global default until the profile gets its own
+static float tolerance_for_profile(uint8_t idx) {
+    uint8_t centigr = ai_trickle_data.speed[idx].tolerance_centigr;
+    return (centigr >= 1 && centigr <= 50) ? centigr * 0.01f : ai_trickle_data.tolerance_gr;
+}
+
+
 static void mode_for_profile(uint8_t idx, trickle_mode_params_t * mode) {
-    trickle_mode_params(speed_for_profile(idx), ai_trickle_data.tolerance_gr, mode);
+    trickle_mode_params(speed_for_profile(idx), tolerance_for_profile(idx), mode);
 }
 
 
 float ai_trickle_tolerance(void) {
-    return ai_trickle_data.tolerance_gr;
+    return tolerance_for_profile(selected_profile_idx());
 }
 
 
 uint8_t ai_trickle_speed(void) {
     return speed_for_profile(selected_profile_idx());
+}
+
+
+// Fine tube reverse after a fine stop: pulls kernels on the tube lip back in
+// so they do not dribble into the pan while the scale settles
+float ai_trickle_fine_reverse_revs(void) {
+    if (ai_trickle_data.fine_reverse_centirev == AI_FINE_REVERSE_OFF) {
+        return 0.0f;
+    }
+    if (ai_trickle_data.fine_reverse_centirev == 0) {
+        return AI_FINE_REVERSE_DEFAULT_REVS;
+    }
+    return ai_trickle_data.fine_reverse_centirev * 0.01f;
 }
 
 
@@ -596,6 +645,14 @@ void ai_trickle_adaptive_end(float charge_time_s) {
         trickle_fit_t fit;
         bool fit_ok = trickle_fit_trace(&trace, model, &fit);
         trickle_model_learn(model, fit_ok ? &fit : NULL, &result, gain);
+
+        // Kernel weight from the kernel noise of the fine flow (rough:
+        // clumps count as big kernels, which is what matters for over charges)
+        float kernel = throw_probe ? NAN : trickle_estimate_kernel_gr(&trace, model);
+        if (!isnan(kernel) && kernel < 1.0f) {
+            float * stored = &ai_trickle_data.kernel_gr[throw_profile_idx];
+            *stored = *stored > 0.0f ? *stored + KERNEL_ESTIMATE_GAIN * (kernel - *stored) : kernel;
+        }
         flags |= AI_THROW_FLAG_MODEL_UPDATED;
         ai_trickle_config_save();
     }
@@ -608,7 +665,7 @@ void ai_trickle_adaptive_end(float charge_time_s) {
     // Learning and probe throws run their own schedule, they say nothing
     // about the speed
     if (ai_trickle_data.auto_speed && done && !learn_active && !throw_probe) {
-        bool over_charge = last_error_gr > ai_trickle_data.tolerance_gr + 0.001f;
+        bool over_charge = last_error_gr > tolerance_for_profile(throw_profile_idx) + 0.001f;
         if (trickle_speed_update(&ai_trickle_data.speed[throw_profile_idx], over_charge, ctrl.topup_count,
                                  charge_time_s)) {
             ai_trickle_config_save();
@@ -677,7 +734,8 @@ uint8_t ai_trickle_menu_apply_preset(void) {
     }
 
     if (ai_tolerance_choice < AI_TOLERANCE_CHOICE_COUNT) {
-        ai_trickle_data.tolerance_gr = tolerance_choices[ai_tolerance_choice] * 0.01f;
+        // The display edits the tolerance of the selected profile
+        ai_trickle_data.speed[selected_profile_idx()].tolerance_centigr = tolerance_choices[ai_tolerance_choice];
     }
 
     ai_trickle_config_save();
@@ -707,7 +765,7 @@ void ai_trickle_menu_sync(void) {
     // Closest menu choice to the tolerance
     float best = 1e9f;
     for (uint8_t i = 0; i < AI_TOLERANCE_CHOICE_COUNT; i += 1) {
-        float d = fabsf(tolerance_choices[i] * 0.01f - ai_trickle_data.tolerance_gr);
+        float d = fabsf(tolerance_choices[i] * 0.01f - ai_trickle_tolerance());
         if (d < best) {
             best = d;
             ai_tolerance_choice = i;
@@ -774,9 +832,11 @@ bool http_rest_ai_config(struct fs_file *file, int num_params, char *params[], c
     // a2 (bool): keep learning during normal charges
     // a3 (int): throws per learning session
     // a4 (bool): tune the speed of each profile automatically
-    // a5 (float): tolerance in grain
+    // a5 (float): tolerance in grain of the selected profile (also the default for profiles without one)
     // a6 (int): set the automatic speed of the selected profile (restarts its tuning)
     // a7 (int): fine trickler angle per tap in degrees (1-180)
+    // a8 (float): fine tube reverse after each fine stop in revolutions (0 = off, max 1)
+    // kw (float): estimated kernel weight of the selected profile, 0 = unknown (read only)
     // ee (bool): save to eeprom
     // Read only
     // tol (float): tolerance (same as a5, kept for older pages)
@@ -814,7 +874,19 @@ bool http_rest_ai_config(struct fs_file *file, int num_params, char *params[], c
         else if (strcmp(params[idx], "a5") == 0) {
             float tolerance = strtof(values[idx], NULL);
             if (tolerance >= 0.01f && tolerance <= 0.5f) {
+                // Per profile; also the default for profiles that never set one
+                ai_trickle_data.speed[pf].tolerance_centigr = (uint8_t) (tolerance * 100.0f + 0.5f);
                 ai_trickle_data.tolerance_gr = tolerance;
+            }
+        }
+        else if (strcmp(params[idx], "a8") == 0) {
+            float revs = strtof(values[idx], NULL);
+            if (revs <= 0.0f) {
+                ai_trickle_data.fine_reverse_centirev = AI_FINE_REVERSE_OFF;
+            }
+            else if (revs <= 1.0f) {
+                uint8_t centirev = (uint8_t) (revs * 100.0f + 0.5f);
+                ai_trickle_data.fine_reverse_centirev = centirev ? centirev : 1;
             }
         }
         else if (strcmp(params[idx], "a7") == 0) {
@@ -825,7 +897,7 @@ bool http_rest_ai_config(struct fs_file *file, int num_params, char *params[], c
         }
         else if (strcmp(params[idx], "a6") == 0) {
             int speed = atoi(values[idx]);
-            trickle_speed_reset(&ai_trickle_data.speed[pf], (uint8_t) (speed < 0 ? 0 : (speed > 100 ? 100 : speed)));
+            restart_speed(pf, (uint8_t) (speed < 0 ? 0 : (speed > 100 ? 100 : speed)));
         }
         else if (strcmp(params[idx], "ee") == 0) {
             save_to_eeprom = string_to_boolean(values[idx]);
@@ -861,7 +933,7 @@ bool http_rest_ai_config(struct fs_file *file, int num_params, char *params[], c
 
     snprintf(buf, sizeof(buf),
              "%s"
-             "{\"a0\":%s,\"a1\":%d,\"a2\":%s,\"a3\":%d,\"a4\":%s,\"a5\":%.3f,\"a7\":%d,\"tg1\":%.4f,\"tol\":%.3f,\"sp\":%d,"
+             "{\"a0\":%s,\"a1\":%d,\"a2\":%s,\"a3\":%d,\"a4\":%s,\"a5\":%.3f,\"a7\":%d,\"a8\":%.2f,\"tg1\":%.4f,\"kw\":%.4f,\"tol\":%.3f,\"sp\":%d,"
              "\"as\":[%.3f,%.2f,%.1f,%d,%.1f],\"lim\":[%.3f,%.2f,%.3f,%.2f],\"pmx\":[%.2f,%.2f],\"acc\":[%.1f,%.1f],"
              "\"est\":%s,\"tg\":%.3f,\"pf\":%d,\"pn\":\"%s\",\"rd\":%s}",
              http_json_header,
@@ -870,10 +942,12 @@ bool http_rest_ai_config(struct fs_file *file, int num_params, char *params[], c
              boolean_to_string(ai_trickle_data.auto_learn),
              ai_trickle_data.learn_throws,
              boolean_to_string(ai_trickle_data.auto_speed),
-             ai_trickle_data.tolerance_gr,
+             tolerance_for_profile(pf),
              (int) ai_trickle_tap_degrees(),
+             ai_trickle_fine_reverse_revs(),
              trickle_model_is_ready(model) ? model->fine_gpr * ai_trickle_tap_degrees() / 360.0f : 0.0f,
-             ai_trickle_data.tolerance_gr,
+             ai_trickle_data.kernel_gr[pf],
+             tolerance_for_profile(pf),
              speed_for_profile(pf),
              speed->over_rate,
              speed->topup_rate,

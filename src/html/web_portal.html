@@ -437,7 +437,7 @@
                             </div>
 
                             <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Tolerance (gr)</span>
+                                <span class="label-text">Tolerance (gr) of the current profile</span>
                                 <input type="number" class="input input-bordered" name="a5" step="0.01" min="0.01" max="0.5">
                             </div>
 
@@ -457,6 +457,12 @@
                             <div class="grid grid-cols-1 gap-1">
                                 <span class="label-text">Speed in Use for the Current Profile</span>
                                 <input type="text" class="input input-bordered" name="sp" disabled="disabled" readonly>
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Fine Tube Reverse After Each Stop (revolutions, 0 = off)</span>
+                                <input type="number" class="input input-bordered" name="a8" step="0.01" min="0" max="1">
+                                <span class="text-sm opacity-80">Pulls kernels on the tube lip back in so they do not dribble into the pan while the scale settles. Default 0.1.</span>
                             </div>
 
                             <div class="grid grid-cols-1 gap-1">
@@ -2085,9 +2091,12 @@
             const notes = [];
             if (c.lim[1] < c.pmx[0] - 0.001) notes.push(`the coarse motor max speed (${c.lim[1]}) caps the profile value (${c.pmx[0]})`);
             if (c.lim[3] < c.pmx[1] - 0.001) notes.push(`the fine motor max speed (${c.lim[3]}) caps the profile value (${c.pmx[1]})`);
-            document.getElementById("aiTapInfo").textContent = c.tg1 > 0 ?
+            // Kernel (or clump) weight estimated from the fine flow, rough
+            const kernelNote = c.kw > 0 ? ` Estimated kernel/clump weight of ${c.pn}: ≈ ${Number(c.kw).toFixed(3)} gr` +
+                (c.kw > c.a5 ? ` - larger than the tolerance (±${Number(c.a5).toFixed(2)} gr): single kernels decide, expect some charges just outside and finish them with Tap.` : ".") : "";
+            document.getElementById("aiTapInfo").textContent = (c.tg1 > 0 ?
                 `≈ ${Number(c.tg1).toFixed(3)} gr per tap with the learned model of ${c.pn}. The Tap button works after a charge while the cup is still on the scale.` :
-                "The Tap button works after a charge while the cup is still on the scale.";
+                "The Tap button works after a charge while the cup is still on the scale.") + kernelNote;
             info.innerHTML =
                 `Profile <b>${c.pn}</b>: coarse ${c.lim[0]} … <b>${c.lim[1]}</b> rev/s, fine ${c.lim[2]} … <b>${c.lim[3]}</b> rev/s, ` +
                 `motor ramps ${c.acc[0]} / ${c.acc[1]} rev/s²` +

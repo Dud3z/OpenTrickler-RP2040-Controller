@@ -81,6 +81,8 @@ static const classic_profile_t classic_profile = {
 
 
 static bool bench_debug = false;
+static float bench_fine_reverse_revs = 0.1f;    // Fine tube reverse after each fine stop (firmware default), 0 = off
+#define BENCH_FINE_REVERSE_RPS  2.0f
 static bool bench_throws = false;
 static bool bench_trace_now = false;
 static int bench_trace_throw = -1;
@@ -253,6 +255,8 @@ static throw_outcome_t run_adaptive(powder_sim_t * sim, const classic_profile_t 
     bool backoff = false;
     float backoff_end = 0.0f;
     bool coarse_stop_hold = false;   // Same as charge_mode.cpp
+    bool fine_reverse = false;
+    float fine_reverse_end = 0.0f;
 
     while (true) {
         float w = next_reading(sim);
@@ -275,6 +279,18 @@ static throw_outcome_t run_adaptive(powder_sim_t * sim, const classic_profile_t 
         }
         if (ctrl.events & TRICKLE_EVENT_TOPUP_STARTED) {
             out.topups += 1;
+        }
+        if ((ctrl.events & TRICKLE_EVENT_FINE_STOPPED) && bench_fine_reverse_revs > 0.0f) {
+            fine_reverse = true;
+            fine_reverse_end = now + bench_fine_reverse_revs / BENCH_FINE_REVERSE_RPS;
+        }
+        if (fine_reverse) {
+            if (now >= fine_reverse_end || fine_rps > 0.0f) {
+                fine_reverse = false;
+            }
+            else {
+                fine_rps = -BENCH_FINE_REVERSE_RPS;
+            }
         }
         if (ctrl.events & TRICKLE_EVENT_PROBE_DONE) {
             // Learn from the probe pulses before charging the rest
@@ -371,6 +387,8 @@ typedef struct {
     double phase_s[TRICKLE_PHASE_PROBE + 1];
     float predicted_s;
     trickle_model_t model;
+    double kernel_sum;
+    int kernel_n;
 } config_result_t;
 
 
@@ -381,6 +399,9 @@ static void run_config(powder_sim_t * sim, trickle_trace_t * trace, const powder
                        config_result_t * out) {
     memset(out, 0, sizeof(*out));
     powder_sim_init(sim, powder, scale, seed);
+    if (getenv("BENCH_NO_FINE_TAIL")) {
+        sim->powder.fine_tail_kernels = 0.0f;
+    }
     trickle_model_reset(&out->model);
 
     // The first throw starts with probe pulses
@@ -397,6 +418,13 @@ static void run_config(powder_sim_t * sim, trickle_trace_t * trace, const powder
         bench_trace_now = bench_trace_throw < 0 || bench_trace_throw == i;
         throw_outcome_t o = run_adaptive(sim, p, target, &out->model, mode, trace, &result, false);
         out->topups += o.topups;
+        if (getenv("BENCH_KERNEL")) {
+            float k = trickle_estimate_kernel_gr(trace, &out->model);
+            if (!isnan(k)) {
+                out->kernel_sum += k;
+                out->kernel_n += 1;
+            }
+        }
         if (bench_throws) {
             printf("    throw %3d landing %+6.3f final %+6.3f true %+6.3f top ups %d time %5.1fs  lsd %.3f aim %.3f bias %+.3f cv %.2f lat %.2f\n",
                    i, result.landing_weight_gr - target, o.final_gr - target, o.true_gr - target, o.topups, o.time_s,
@@ -633,6 +661,9 @@ static int tuning_sweep(int eval_throws) {
 
 int main(int argc, char ** argv) {
     int eval_throws = EVAL_THROWS;
+    if (getenv("BENCH_FINE_REVERSE")) {
+        bench_fine_reverse_revs = strtof(getenv("BENCH_FINE_REVERSE"), NULL);
+    }
     if (argc > 1 && strcmp(argv[1], "sweep") == 0) {
         return tuning_sweep(argc > 2 ? atoi(argv[2]) : 60);
     }
@@ -682,6 +713,10 @@ int main(int argc, char ** argv) {
             printf("  %-22s tolerance %.3f gr, %.2f top ups per throw, predicted time %.1fs\n", "",
                    mode.tolerance_gr, (double) r.topups / eval_throws, r.predicted_s);
             print_model(&r.model, powder);
+            if (r.kernel_n) {
+                printf("  kernel estimate %.4f gr (true %.4f), from %d of %d throws\n", r.kernel_sum / r.kernel_n,
+                       powder->kernel_gr, r.kernel_n, eval_throws);
+            }
 
             if (r.stats.faults) {
                 failures += 1;

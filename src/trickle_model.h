@@ -98,7 +98,7 @@ typedef struct {
     uint8_t speed;              // 0 = careful ... 100 = fastest
     uint8_t clean_streak;       // Adaptive charges without over charge since the last change
     uint8_t best_speed;         // Speed with the shortest mean charge time seen so far
-    uint8_t reserved;
+    uint8_t tolerance_centigr;  // Tolerance of this profile in 0.01 gr, 0 = the global default (firmware only)
     float over_rate;            // Exponentially weighted share of over charges
     float topup_rate;           // Exponentially weighted top ups per charge
     float mean_time_s;          // Exponentially weighted charge time at the current speed (s)
@@ -133,6 +133,7 @@ typedef enum {
 #define TRICKLE_EVENT_MAIN_STOPPED      (1 << 1)
 #define TRICKLE_EVENT_TOPUP_STARTED     (1 << 2)
 #define TRICKLE_EVENT_PROBE_DONE        (1 << 3)    // Caller may fit the trace and update the model now
+#define TRICKLE_EVENT_FINE_STOPPED      (1 << 4)    // The fine trickler stopped for settling (main stop or end of a top up)
 
 
 typedef struct {
@@ -273,6 +274,10 @@ typedef struct {
 #define TRICKLE_TOPUP_TRAIN     1       // Short pulses, after each one check the prediction
 
 extern trickle_tuning_t trickle_tuning;
+
+// Kernel weight from the kernel by kernel noise of the fine flow in a trace,
+// NAN if the trace has no usable fine-only stretch
+float trickle_estimate_kernel_gr(const trickle_trace_t * trace, const trickle_model_t * model);
 
 // Mode
 void trickle_mode_params(uint8_t speed, float tolerance_gr, trickle_mode_params_t * params);
