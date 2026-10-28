@@ -524,17 +524,25 @@ static void charge_mode_wait_for_complete_adaptive() {
 }
 
 
-// A profile with a max speed of 0 (e.g. an unused slot) cannot charge: say so
-// instead of waiting with standing motors
+// A profile with a max speed of 0 (e.g. an unused slot) or motors that failed
+// to start cannot charge: say so instead of waiting with standing motors
 static bool charge_mode_check_profile() {
     trickle_motor_limits_t limits;
     charge_mode_get_trickler_limits(&limits);
-    if (limits.coarse_max_rps > 0.0f && limits.fine_max_rps > 0.0f) {
+    motor_init_err_t motor_error = get_motor_init_error();
+    if (motor_error == MOTOR_INIT_OK && limits.coarse_max_rps > 0.0f && limits.fine_max_rps > 0.0f) {
         return true;
     }
 
-    snprintf(title_string, sizeof(title_string), "Profile not set up");
-    snprintf(status_string, sizeof(status_string), "Max speed is 0, press to exit");
+    if (motor_error != MOTOR_INIT_OK) {
+        // The motor drivers did not answer at start up, the motors are off
+        snprintf(title_string, sizeof(title_string), "Motor error");
+        snprintf(status_string, sizeof(status_string), "%s, press to exit", get_motor_init_error_string(motor_error));
+    }
+    else {
+        snprintf(title_string, sizeof(title_string), "Profile not set up");
+        snprintf(status_string, sizeof(status_string), "Max speed is 0, press to exit");
+    }
     neopixel_led_set_colour(
         neopixel_led_config.eeprom_neopixel_led_metadata.default_led_colours.mini12864_backlight_colour,
         charge_mode_config.eeprom_charge_mode_data.neopixel_over_charge_colour,

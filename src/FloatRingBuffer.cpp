@@ -3,23 +3,30 @@
 
 // TODO: Integrate CMSIS DSP for core algorithm
 
+// Statistics only cover the filled slots: after reset() only the first
+// `count` entries have been written (see enqueue()), the rest is stale or
+// uninitialized memory.
 float FloatRingBuffer::getSd(void){
+    if (count == 0) {
+        return 0.0f;
+    }
+
     double sum = getSum();
-    float mean = sum / buffer_size;
+    float mean = sum / count;
     double sum_of_sqre = 0.0;
 
-    for (size_t idx=0; idx<buffer_size; idx++){
+    for (size_t idx=0; idx<count; idx++){
         sum_of_sqre += pow(data[idx] - mean, 2);
     }
 
-    float sd = sqrt(sum_of_sqre / buffer_size);
-    
+    float sd = sqrt(sum_of_sqre / count);
+
     return sd;
 }
 
 double FloatRingBuffer::getSum(){
     double sum = 0.0;
-    for (size_t idx=0; idx<buffer_size; idx++){
+    for (size_t idx=0; idx<count; idx++){
         sum += data[idx];
     }
 
@@ -27,8 +34,12 @@ double FloatRingBuffer::getSum(){
 }
 
 float FloatRingBuffer::getMean(void){
+    if (count == 0) {
+        return 0.0f;
+    }
+
     double sum = getSum();
-    float mean = sum / buffer_size;
+    float mean = sum / count;
 
     return mean;
 }

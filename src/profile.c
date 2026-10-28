@@ -81,20 +81,72 @@ const eeprom_profile_data_t default_profile_data = {
         .fine_max_flow_speed_rps = 5.0f,
     },
     .profiles[4] = {
+        // Unused slot with the AR2209 settings, so it works right away
         .compatibility = 0,
         .name = "Profile4",
+
+        .coarse_kp = 0.05f,
+        .coarse_ki = 0.0f,
+        .coarse_kd = 0.3f,
+        .coarse_min_flow_speed_rps = 0.1f,
+        .coarse_max_flow_speed_rps = 8.0f,
+
+        .fine_kp = 0.8f,
+        .fine_ki = 0.0f,
+        .fine_kd = 15.0f,
+        .fine_min_flow_speed_rps = 0.08f,
+        .fine_max_flow_speed_rps = 2.0f,
     },
     .profiles[5] = {
+        // Unused slot with the AR2209 settings, so it works right away
         .compatibility = 0,
         .name = "Profile5",
+
+        .coarse_kp = 0.05f,
+        .coarse_ki = 0.0f,
+        .coarse_kd = 0.3f,
+        .coarse_min_flow_speed_rps = 0.1f,
+        .coarse_max_flow_speed_rps = 8.0f,
+
+        .fine_kp = 0.8f,
+        .fine_ki = 0.0f,
+        .fine_kd = 15.0f,
+        .fine_min_flow_speed_rps = 0.08f,
+        .fine_max_flow_speed_rps = 2.0f,
     },
     .profiles[6] = {
+        // Unused slot with the AR2209 settings, so it works right away
         .compatibility = 0,
         .name = "Profile6",
+
+        .coarse_kp = 0.05f,
+        .coarse_ki = 0.0f,
+        .coarse_kd = 0.3f,
+        .coarse_min_flow_speed_rps = 0.1f,
+        .coarse_max_flow_speed_rps = 8.0f,
+
+        .fine_kp = 0.8f,
+        .fine_ki = 0.0f,
+        .fine_kd = 15.0f,
+        .fine_min_flow_speed_rps = 0.08f,
+        .fine_max_flow_speed_rps = 2.0f,
     },
     .profiles[7] = {
+        // Unused slot with the AR2209 settings, so it works right away
         .compatibility = 0,
         .name = "Profile7",
+
+        .coarse_kp = 0.05f,
+        .coarse_ki = 0.0f,
+        .coarse_kd = 0.3f,
+        .coarse_min_flow_speed_rps = 0.1f,
+        .coarse_max_flow_speed_rps = 8.0f,
+
+        .fine_kp = 0.8f,
+        .fine_ki = 0.0f,
+        .fine_kd = 15.0f,
+        .fine_min_flow_speed_rps = 0.08f,
+        .fine_max_flow_speed_rps = 2.0f,
     },
 };
 
@@ -115,6 +167,27 @@ bool profile_data_init() {
     if (!is_ok) {
         printf("Unable to read profile data\n");
         return false;
+    }
+
+    // Unused slots used to have all speeds at 0, which cannot charge. Give
+    // every such profile the working AR2209 settings, the name is kept.
+    bool repaired = false;
+    for (uint8_t idx = 0; idx < MAX_PROFILE_CNT; idx += 1) {
+        profile_t * profile = &profile_data.profiles[idx];
+        if (!profile_is_usable(profile)) {
+            char name[PROFILE_NAME_MAX_LEN];
+            memcpy(name, profile->name, sizeof(name));
+            *profile = default_profile_data.profiles[1];
+            memcpy(profile->name, name, sizeof(name));
+            repaired = true;
+        }
+    }
+    if (profile_data.current_profile_idx >= MAX_PROFILE_CNT) {
+        profile_data.current_profile_idx = 0;
+        repaired = true;
+    }
+    if (repaired) {
+        profile_data_save();
     }
 
     // Register to eeprom save all
@@ -276,7 +349,7 @@ bool http_rest_profile_config(struct fs_file *file, int num_params, char *params
 }
 
 
-// A slot is free when it still holds an unused default profile
+// A slot is free while it still has its default name "ProfileN" (or none)
 static bool profile_slot_is_free(uint8_t idx) {
     const profile_t * profile = &profile_data.profiles[idx];
     if (profile->name[0] == '\0') {
@@ -284,8 +357,7 @@ static bool profile_slot_is_free(uint8_t idx) {
     }
     char default_name[PROFILE_NAME_MAX_LEN];
     snprintf(default_name, sizeof(default_name), "Profile%d", idx);
-    return strncmp(profile->name, default_name, PROFILE_NAME_MAX_LEN) == 0 &&
-           profile->coarse_max_flow_speed_rps <= 0.0f && profile->fine_max_flow_speed_rps <= 0.0f;
+    return strncmp(profile->name, default_name, PROFILE_NAME_MAX_LEN) == 0;
 }
 
 
@@ -349,9 +421,16 @@ bool http_rest_profile_new(struct fs_file *file, int num_params, char *params[],
             profile_data.profiles[slot] = profile_data.profiles[from];
         }
         if (!profile_is_usable(&profile_data.profiles[from])) {
-            // Copying an empty slot would give a profile that cannot move the
-            // tricklers; start from the AR2209 defaults instead
-            profile_data.profiles[slot] = default_profile_data.profiles[1];
+            // Never start from settings that cannot move the tricklers: take
+            // the first working profile, or the AR2209 defaults
+            const profile_t * source = &default_profile_data.profiles[1];
+            for (uint8_t idx = 0; idx < MAX_PROFILE_CNT; idx += 1) {
+                if (idx != slot && profile_is_usable(&profile_data.profiles[idx])) {
+                    source = &profile_data.profiles[idx];
+                    break;
+                }
+            }
+            profile_data.profiles[slot] = *source;
         }
         memset(profile_data.profiles[slot].name, 0x0, PROFILE_NAME_MAX_LEN);
         strncpy(profile_data.profiles[slot].name, name, PROFILE_NAME_MAX_LEN - 1);
@@ -387,7 +466,8 @@ bool http_rest_profile_summary(struct fs_file *file, int num_params, char *param
     // Response
     // s0 (dict): A dictionary of all profiles in {idx: name} format. 
     // s1 (int): The current loaded profile index
-    // s2 (list): 1 if the profile can charge (max speeds set), per index
+    // s2 (list): per index, 1 if the profile is in use and can charge, 0 for a
+    //            free slot ("ProfileN") or one without speeds
     memset(buf, 0x0, sizeof(buf));
     const char * item_template = "\"%d\":\"%s\",";
 
@@ -415,7 +495,8 @@ bool http_rest_profile_summary(struct fs_file *file, int num_params, char *param
                          profile_data.current_profile_idx);
     for (uint8_t p_idx = 0; p_idx < MAX_PROFILE_CNT && char_idx < sizeof(buf) - 4; p_idx += 1) {
         char_idx += snprintf(&buf[char_idx], sizeof(buf) - char_idx, "%s%d",
-                             p_idx ? "," : "", profile_is_usable(&profile_data.profiles[p_idx]) ? 1 : 0);
+                             p_idx ? "," : "",
+                             (profile_is_usable(&profile_data.profiles[p_idx]) && !profile_slot_is_free(p_idx)) ? 1 : 0);
     }
     snprintf(&buf[char_idx], sizeof(buf) - char_idx, "]}");
 

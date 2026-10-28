@@ -690,39 +690,58 @@ const char * get_motor_select_string(motor_select_t selected_motor) {
 /* 
 The function will assume the screen and cyw43 are already initialized. 
 */
+static motor_init_err_t motor_last_init_error = MOTOR_INIT_OK;
+
+
+const char * get_motor_init_error_string(motor_init_err_t err) {
+    switch (err)
+    {
+        case MOTOR_INIT_OK:
+            return "OK";
+        case MOTOR_INIT_CFG_ERR:
+            return "CFG ERR";
+        case MOTOR_INIT_COARSE_DRV_ERR:
+            return "COARSE DRV ERR";
+        case MOTOR_INIT_FINE_DRV_ERR:
+            return "FINE DRV ERR";
+        case MOTOR_INIT_PIO_ERR:
+            return "PIO ERR";
+        default:
+            return "UNDEF ERR";
+    }
+}
+
+
+motor_init_err_t get_motor_init_error(void) {
+    return motor_last_init_error;
+}
+
+
+/*
+ * Shows the fault for a while, then returns so that WiFi, the web page and
+ * the firmware update still come up (e.g. to fix a setting). The motors stay
+ * off: their control tasks were not created, motor_set_speed() does nothing,
+ * and charge mode refuses to start (see get_motor_init_error()).
+ */
 void handle_motor_init_error(motor_init_err_t err) {
     char * error_string;
 
-    switch (err)
-    {
-        case MOTOR_INIT_CFG_ERR:
-            error_string = "CFG ERR";
-            break;
-        case MOTOR_INIT_COARSE_DRV_ERR:
-            error_string = "COARSE DRV ERR";
-            break;
-        case MOTOR_INIT_FINE_DRV_ERR:
-            error_string = "FINE DRV ERR";
-            break;
-        case MOTOR_INIT_PIO_ERR:
-            error_string = "PIO ERR";
-            break;
-        default:
-            error_string = "UNDEF ERR";
-            break;
-    }
+    motor_last_init_error = err;
+
+    error_string = (char *) get_motor_init_error_string(err);
 
     // Draw the error message on the screen
     u8g2_t * display_handler = get_display_handler();
     char title_string[32] = "Motor Init Error";
 
-    while (true) {
+    const int repeat_count = 3;
+    for (int repeat = 0; repeat < repeat_count; repeat += 1) {
         BaseType_t scheduler_state = xTaskGetSchedulerState();
 
         // Flash LED
         for (int i = 0; i < err; i++) {
             // Set neopixel LED colour
-            _neopixel_led_set_colour(0xFFA500, 0xFFA5000, 0xffffff);
+            _neopixel_led_set_colour(0xFFA500, 0xFFA500, 0xffffff);
             delay_ms(200, scheduler_state);
             _neopixel_led_set_colour(0xFF0000, 0xFF0000, 0xffffff);
             delay_ms(200, scheduler_state);

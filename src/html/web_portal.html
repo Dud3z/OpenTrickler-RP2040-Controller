@@ -8,7 +8,7 @@
     <link href="https://cdn.jsdelivr.net/npm/daisyui@4.7.3/dist/full.min.css" rel="stylesheet" type="text/css" />
     <script src="https://cdn.tailwindcss.com"></script>
 
-    <meta name="viewport" content="width=device-width, initial-scale=1.0 viewport-fit=cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <link rel="icon" href="https://raw.githubusercontent.com/eamars/OpenTrickler/main/Resources/favicon.ico">
 
     <style>
@@ -221,7 +221,7 @@
                                     </svg>
                                     <a href="https://github.com/eamars/OpenTrickler/blob/main/Manual/tuning_guide.md" class="link">Powder Profile Tuning Guide</a>
                                 </div>
-                                <div id="profileSpeedWarning" role="alert" class="alert alert-warning text-sm" style="display: none;">This profile has a max flow speed of 0 and cannot charge. Set the coarse and fine max speeds below, or use New Profile to start from working settings.</div>
+                                <div id="profileSpeedWarning" role="alert" class="alert alert-warning text-sm" style="display: none;">This is a free profile slot. Use New Profile to create a profile with a name, it takes over working settings. A free slot can be overwritten by New Profile.</div>
                                 <span class="label-text text-sm opacity-80">With AI Trickle enabled, the Kp/Ki/Kd values are not used. The min/max flow speeds are used by both controllers, the max speeds limit the charge time the most.</span>
 
                                 <span class="label-text">Select Profile</span>
@@ -1949,7 +1949,7 @@
             const usable = summary.s2 || [];
             for (const option of select.options) {
                 const name = summary.s0[option.value];
-                option.textContent = `#${option.value} ${name || ""}${usable[option.value] === 0 ? " (not set up)" : ""}`;
+                option.textContent = `#${option.value} ${name || ""}${usable[option.value] === 0 ? " (free)" : ""}`;
             }
             const warning = document.getElementById("profileSpeedWarning");
             warning.style.display = usable[select.value] === 0 ? "" : "none";
