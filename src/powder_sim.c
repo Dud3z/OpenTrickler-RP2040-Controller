@@ -22,6 +22,7 @@ static const powder_sim_powder_t powder_presets[POWDER_SIM_PRESET_COUNT] = {
         .fall_jitter_s = 0.05f,
         .coarse_tail_kernels = 25.0f,
         .fine_tail_kernels = 4.0f,
+        .fine_reverse_eject = 150.0f,
     },
     [POWDER_SIM_SHORT_EXTRUDED] = {
         .name = "Short extruded",
@@ -36,6 +37,7 @@ static const powder_sim_powder_t powder_presets[POWDER_SIM_PRESET_COUNT] = {
         .fall_jitter_s = 0.08f,
         .coarse_tail_kernels = 20.0f,
         .fine_tail_kernels = 3.0f,
+        .fine_reverse_eject = 25.0f,
     },
     [POWDER_SIM_LONG_STICK] = {
         .name = "Long stick",
@@ -50,6 +52,7 @@ static const powder_sim_powder_t powder_presets[POWDER_SIM_PRESET_COUNT] = {
         .fall_jitter_s = 0.12f,
         .coarse_tail_kernels = 18.0f,
         .fine_tail_kernels = 2.0f,
+        .fine_reverse_eject = 15.0f,
     },
     [POWDER_SIM_FLAKE] = {
         .name = "Flake",
@@ -64,6 +67,7 @@ static const powder_sim_powder_t powder_presets[POWDER_SIM_PRESET_COUNT] = {
         .fall_jitter_s = 0.1f,
         .coarse_tail_kernels = 30.0f,
         .fine_tail_kernels = 3.0f,
+        .fine_reverse_eject = 40.0f,
     },
 };
 
@@ -230,9 +234,23 @@ bool powder_sim_step(powder_sim_t * sim, float dt, float * reading_gr) {
         sim->fine_tail_release_t = sim->t;
     }
     sim->fine_was_running = fine_running;
+    // Turning back further than the kernels on the lip need pushes others out
+    if (sim->fine_rps < 0.0f) {
+        float before = sim->fine_reversed_revs;
+        sim->fine_reversed_revs += -sim->fine_rps * dt;
+        float beyond = fmaxf(sim->fine_reversed_revs - 0.02f, 0.0f) - fmaxf(before - 0.02f, 0.0f);
+        int n = kernel_count(sim, sim->powder.fine_reverse_eject * beyond);
+        if (n > 0) {
+            queue_push(sim, sim->t + fall_time(sim), n * sim->powder.kernel_gr);
+        }
+    }
+    else if (sim->fine_rps > 0.05f) {
+        sim->fine_reversed_revs = 0.0f;
+    }
+
     if (sim->pending_fine_tail_kernels > 0.0f) {
         if (sim->fine_rps < 0.0f) {
-            float pulled = 10.0f * (-sim->fine_rps) * dt;
+            float pulled = 50.0f * (-sim->fine_rps) * dt;   // 0.02 rev pulls back about 60%
             sim->pending_fine_tail_kernels *= (pulled < 1.0f) ? (1.0f - pulled) : 0.0f;
         }
         float release = sim->pending_fine_tail_kernels * dt / TAIL_RELEASE_S;

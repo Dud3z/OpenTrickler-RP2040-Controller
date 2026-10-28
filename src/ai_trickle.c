@@ -53,6 +53,7 @@ const eeprom_ai_trickle_data_t default_ai_trickle_data = {
 // Sizes of older blocks: everything before the fields added later
 #define AI_TRICKLE_DATA_V1_SIZE     offsetof(eeprom_ai_trickle_data_t, tolerance_gr)
 #define AI_TRICKLE_DATA_V2_SIZE     offsetof(eeprom_ai_trickle_data_t, kernel_gr)
+#define AI_TRICKLE_DATA_V3_SIZE     offsetof(eeprom_ai_trickle_data_t, reverse)
 
 #define KERNEL_ESTIMATE_GAIN        0.2f
 
@@ -145,6 +146,7 @@ static void restart_speed(uint8_t idx, uint8_t speed) {
 static void reset_speed(uint8_t idx) {
     trickle_speed_reset(&ai_trickle_data.speed[idx], ai_trickle_data.precision_level);
     ai_trickle_data.kernel_gr[idx] = 0.0f;
+    trickle_reverse_reset(&ai_trickle_data.reverse[idx]);
 }
 
 
@@ -161,10 +163,20 @@ bool ai_trickle_init(void) {
     if (read_config_block(&ai_trickle_data, sizeof(eeprom_ai_trickle_data_t))) {
         is_ok = true;
     }
+    else if (read_config_block(&ai_trickle_data, AI_TRICKLE_DATA_V3_SIZE)) {
+        // Rev 3: everything stays, the reverse tuning starts fresh in auto
+        // (rev 3 used a fixed 0.1 rev by default, too much for many tubes)
+        printf("Migrating AI trickle configuration from rev 3\n");
+        memset(ai_trickle_data.reverse, 0x0, sizeof(ai_trickle_data.reverse));
+        ai_trickle_data.fine_reverse_centirev = AI_FINE_REVERSE_AUTO;
+        is_ok = save_config(EEPROM_AI_TRICKLE_BASE_ADDR, &ai_trickle_data, sizeof(eeprom_ai_trickle_data_t));
+    }
     else if (read_config_block(&ai_trickle_data, AI_TRICKLE_DATA_V2_SIZE)) {
-        // Rev 2: everything stays, the kernel estimates start empty
+        // Rev 2: everything stays, kernel estimates and reverse tuning start empty
         printf("Migrating AI trickle configuration from rev 2\n");
         memset(ai_trickle_data.kernel_gr, 0x0, sizeof(ai_trickle_data.kernel_gr));
+        memset(ai_trickle_data.reverse, 0x0, sizeof(ai_trickle_data.reverse));
+        ai_trickle_data.fine_reverse_centirev = AI_FINE_REVERSE_AUTO;
         is_ok = save_config(EEPROM_AI_TRICKLE_BASE_ADDR, &ai_trickle_data, sizeof(eeprom_ai_trickle_data_t));
     }
     else if (read_config_block(&ai_trickle_data, AI_TRICKLE_DATA_V1_SIZE)) {
@@ -177,6 +189,7 @@ bool ai_trickle_init(void) {
         ai_trickle_data.fine_reverse_centirev = 0;
         memset(ai_trickle_data.reserved2, 0x0, sizeof(ai_trickle_data.reserved2));
         memset(ai_trickle_data.kernel_gr, 0x0, sizeof(ai_trickle_data.kernel_gr));
+        memset(ai_trickle_data.reverse, 0x0, sizeof(ai_trickle_data.reverse));
         if (ai_trickle_data.mode_preset == AI_PRESET_AUTO) {
             // Rev 1 had Custom at this position
             ai_trickle_data.mode_preset = AI_PRESET_CUSTOM;
@@ -221,8 +234,9 @@ bool ai_trickle_init(void) {
             ai_trickle_data.kernel_gr[i] = 0.0f;
         }
     }
-    if (ai_trickle_data.fine_reverse_centirev > 100 && ai_trickle_data.fine_reverse_centirev != AI_FINE_REVERSE_OFF) {
-        ai_trickle_data.fine_reverse_centirev = 0;
+    if (ai_trickle_data.fine_reverse_centirev > AI_FINE_REVERSE_MAX_CENTIREV &&
+        ai_trickle_data.fine_reverse_centirev != AI_FINE_REVERSE_OFF) {
+        ai_trickle_data.fine_reverse_centirev = AI_FINE_REVERSE_AUTO;
     }
     ai_trickle_menu_sync();
     if (ai_trickle_data.learn_throws < 2 || ai_trickle_data.learn_throws > AI_TRICKLE_MAX_LEARN_THROWS) {
@@ -286,16 +300,25 @@ uint8_t ai_trickle_speed(void) {
 }
 
 
-// Fine tube reverse after a fine stop: pulls kernels on the tube lip back in
-// so they do not dribble into the pan while the scale settles
+// Fine tube reverse of the running charge: pulls kernels on the tube lip back
+// in so they do not dribble into the pan while the scale settles. In auto the
+// candidates are tried per profile (see trickle_reverse_choose()).
+static float throw_reverse_revs = 0.0f;
+
 float ai_trickle_fine_reverse_revs(void) {
-    if (ai_trickle_data.fine_reverse_centirev == AI_FINE_REVERSE_OFF) {
-        return 0.0f;
+    return throw_reverse_revs;
+}
+
+
+static float choose_reverse(uint8_t idx) {
+    trickle_reverse_state_t * state = &ai_trickle_data.reverse[idx];
+    uint8_t setting = ai_trickle_data.fine_reverse_centirev;
+    if (setting == AI_FINE_REVERSE_AUTO) {
+        return trickle_reverse_candidate_revs(trickle_reverse_choose(state));
     }
-    if (ai_trickle_data.fine_reverse_centirev == 0) {
-        return AI_FINE_REVERSE_DEFAULT_REVS;
-    }
-    return ai_trickle_data.fine_reverse_centirev * 0.01f;
+    // Fixed (or off): the statistics of slot 0 belong to that setting
+    state->current = 0;
+    return setting == AI_FINE_REVERSE_OFF ? 0.0f : setting * 0.01f;
 }
 
 
@@ -567,6 +590,11 @@ void ai_trickle_adaptive_begin(float target_gr, const trickle_motor_limits_t * l
         current_weight_gr = 0.0f;
     }
 
+    // Fine tube reverse of this throw, and the dribble that is still expected
+    // after a fine stop with it (used to size the top ups)
+    throw_reverse_revs = choose_reverse(throw_profile_idx);
+    mode.stop_rise_gr = trickle_reverse_expected_rise_gr(&ai_trickle_data.reverse[throw_profile_idx]);
+
     ctrl_limits = *limits;
     trickle_ctrl_init(&ctrl, target_gr, model, &mode, &ctrl_limits, 0.0f, current_weight_gr);
     trickle_trace_reset(&trace, 0.0f);
@@ -609,6 +637,7 @@ trickle_phase_t ai_trickle_adaptive_step(float t, float weight_gr, float * coars
 void ai_trickle_adaptive_resume(float t, float current_weight_gr) {
     trickle_mode_params_t mode;
     mode_for_profile(throw_profile_idx, &mode);
+    mode.stop_rise_gr = trickle_reverse_expected_rise_gr(&ai_trickle_data.reverse[throw_profile_idx]);
 
     // Keep the trace, restart the controller from the current weight
     trickle_ctrl_init(&ctrl, ctrl.target_gr, &ai_trickle_data.models[throw_profile_idx], &mode, &ctrl_limits,
@@ -640,6 +669,9 @@ void ai_trickle_adaptive_end(float charge_time_s) {
         flags |= AI_THROW_FLAG_SERIES;
     }
 
+    // One EEPROM write per throw at most
+    bool save = false;
+
     float gain = learn_active ? LEARN_GAIN : (ai_trickle_data.auto_learn ? CONTINUOUS_GAIN : 0.0f);
     if (done && gain > 0.0f) {
         trickle_fit_t fit;
@@ -654,7 +686,7 @@ void ai_trickle_adaptive_end(float charge_time_s) {
             *stored = *stored > 0.0f ? *stored + KERNEL_ESTIMATE_GAIN * (kernel - *stored) : kernel;
         }
         flags |= AI_THROW_FLAG_MODEL_UPDATED;
-        ai_trickle_config_save();
+        save = true;
     }
 
     float final = done ? result.final_weight_gr : ctrl.last_weight_gr;
@@ -666,10 +698,20 @@ void ai_trickle_adaptive_end(float charge_time_s) {
     // about the speed
     if (ai_trickle_data.auto_speed && done && !learn_active && !throw_probe) {
         bool over_charge = last_error_gr > tolerance_for_profile(throw_profile_idx) + 0.001f;
-        if (trickle_speed_update(&ai_trickle_data.speed[throw_profile_idx], over_charge, ctrl.topup_count,
-                                 charge_time_s)) {
-            ai_trickle_config_save();
-        }
+        save |= trickle_speed_update(&ai_trickle_data.speed[throw_profile_idx], over_charge, ctrl.topup_count,
+                                     charge_time_s);
+    }
+
+    // Dribble after the fine stop with the reverse of this throw: the auto
+    // reverse keeps the candidate with the smallest dribble
+    if (done && !throw_probe && !isnan(result.stop_predicted_gr)) {
+        trickle_reverse_update(&ai_trickle_data.reverse[throw_profile_idx],
+                               result.landing_weight_gr - result.stop_predicted_gr);
+        save = true;
+    }
+
+    if (save) {
+        ai_trickle_config_save();
     }
 
     if (learn_active && done) {
@@ -835,7 +877,8 @@ bool http_rest_ai_config(struct fs_file *file, int num_params, char *params[], c
     // a5 (float): tolerance in grain of the selected profile (also the default for profiles without one)
     // a6 (int): set the automatic speed of the selected profile (restarts its tuning)
     // a7 (int): fine trickler angle per tap in degrees (1-180)
-    // a8 (float): fine tube reverse after each fine stop in revolutions (0 = off, max 1)
+    // a8 (str/float): fine tube reverse after each fine stop: "auto", "off" or revolutions (max 0.3)
+    // Read only: a8 is "auto", "off" or the revolutions; rv: [revolutions in use, dribble gr, charges per candidate x3]
     // kw (float): estimated kernel weight of the selected profile, 0 = unknown (read only)
     // ee (bool): save to eeprom
     // Read only
@@ -847,7 +890,7 @@ bool http_rest_ai_config(struct fs_file *file, int num_params, char *params[], c
     // est (float): estimated charge time for the current target and profile
     // pf (int), pn (str): selected profile
     // rd (bool): model of the selected profile is ready
-    static char buf[576];
+    static char buf[704];
     bool save_to_eeprom = false;
     uint8_t pf = selected_profile_idx();
 
@@ -880,13 +923,24 @@ bool http_rest_ai_config(struct fs_file *file, int num_params, char *params[], c
             }
         }
         else if (strcmp(params[idx], "a8") == 0) {
+            // "auto", "off" or revolutions (0 = off)
+            uint8_t previous = ai_trickle_data.fine_reverse_centirev;
             float revs = strtof(values[idx], NULL);
-            if (revs <= 0.0f) {
+            if (strcmp(values[idx], "auto") == 0 || revs < 0.0f) {
+                ai_trickle_data.fine_reverse_centirev = AI_FINE_REVERSE_AUTO;
+            }
+            else if (strcmp(values[idx], "off") == 0 || revs <= 0.0f) {
                 ai_trickle_data.fine_reverse_centirev = AI_FINE_REVERSE_OFF;
             }
-            else if (revs <= 1.0f) {
+            else if (revs <= AI_FINE_REVERSE_MAX_CENTIREV * 0.01f) {
                 uint8_t centirev = (uint8_t) (revs * 100.0f + 0.5f);
                 ai_trickle_data.fine_reverse_centirev = centirev ? centirev : 1;
+            }
+            if (ai_trickle_data.fine_reverse_centirev != previous) {
+                // The measured dribble belongs to the old setting
+                for (int i = 0; i < MAX_PROFILE_CNT; i += 1) {
+                    trickle_reverse_reset(&ai_trickle_data.reverse[i]);
+                }
             }
         }
         else if (strcmp(params[idx], "a7") == 0) {
@@ -931,9 +985,27 @@ bool http_rest_ai_config(struct fs_file *file, int num_params, char *params[], c
     char est_buf[16];
     json_float(est_buf, sizeof(est_buf), estimate, 1);
 
+    // Fine tube reverse: setting, and what the profile uses / has learned
+    trickle_reverse_state_t * reverse = &ai_trickle_data.reverse[pf];
+    uint8_t rev_setting = ai_trickle_data.fine_reverse_centirev;
+    char a8_buf[16];
+    float rev_in_use;
+    if (rev_setting == AI_FINE_REVERSE_AUTO) {
+        snprintf(a8_buf, sizeof(a8_buf), "\"auto\"");
+        rev_in_use = trickle_reverse_candidate_revs(reverse->current);
+    }
+    else if (rev_setting == AI_FINE_REVERSE_OFF) {
+        snprintf(a8_buf, sizeof(a8_buf), "\"off\"");
+        rev_in_use = 0.0f;
+    }
+    else {
+        snprintf(a8_buf, sizeof(a8_buf), "%.2f", rev_setting * 0.01f);
+        rev_in_use = rev_setting * 0.01f;
+    }
+
     snprintf(buf, sizeof(buf),
              "%s"
-             "{\"a0\":%s,\"a1\":%d,\"a2\":%s,\"a3\":%d,\"a4\":%s,\"a5\":%.3f,\"a7\":%d,\"a8\":%.2f,\"tg1\":%.4f,\"kw\":%.4f,\"tol\":%.3f,\"sp\":%d,"
+             "{\"a0\":%s,\"a1\":%d,\"a2\":%s,\"a3\":%d,\"a4\":%s,\"a5\":%.3f,\"a7\":%d,\"a8\":%s,\"rv\":[%.2f,%.3f,%d,%d,%d,%.2f],\"tg1\":%.4f,\"kw\":%.4f,\"tol\":%.3f,\"sp\":%d,"
              "\"as\":[%.3f,%.2f,%.1f,%d,%.1f],\"lim\":[%.3f,%.2f,%.3f,%.2f],\"pmx\":[%.2f,%.2f],\"acc\":[%.1f,%.1f],"
              "\"est\":%s,\"tg\":%.3f,\"pf\":%d,\"pn\":\"%s\",\"rd\":%s}",
              http_json_header,
@@ -944,7 +1016,11 @@ bool http_rest_ai_config(struct fs_file *file, int num_params, char *params[], c
              boolean_to_string(ai_trickle_data.auto_speed),
              tolerance_for_profile(pf),
              (int) ai_trickle_tap_degrees(),
-             ai_trickle_fine_reverse_revs(),
+             a8_buf,
+             rev_in_use,
+             trickle_reverse_expected_rise_gr(reverse),
+             reverse->count[0], reverse->count[1], reverse->count[2],
+             trickle_reverse_candidate_revs(trickle_reverse_best(reverse)),
              trickle_model_is_ready(model) ? model->fine_gpr * ai_trickle_tap_degrees() / 360.0f : 0.0f,
              ai_trickle_data.kernel_gr[pf],
              tolerance_for_profile(pf),

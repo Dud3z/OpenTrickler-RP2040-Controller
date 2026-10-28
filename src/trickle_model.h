@@ -84,6 +84,7 @@ typedef struct {
     float topup_ratio;          // Share of the missing powder a top up asks for
     float topup_settle_extra_s; // Settle wait after a top up on top of the latency (s)
     uint8_t early_topup;        // Top up before the scale is fully settled when clearly short
+    float stop_rise_gr;         // Powder that still arrives after a fine stop beyond the prediction (dribble), set by the caller
     float settle_timeout_s;     // Maximum wait for the scale to settle (s)
     uint8_t settle_samples;     // Stable readings needed before judging the weight
 } trickle_mode_params_t;
@@ -176,6 +177,7 @@ typedef struct {
     float fine_out;
     float t_out;
     float predicted_gr;         // Predicted final weight if the motors stopped now
+    float stop_predicted_gr;    // predicted_gr at the main stop
 
     // Settle detection
     float settle_window[8];
@@ -249,6 +251,7 @@ typedef struct {
     float charge_time_s;
     bool adaptive;              // true if the adaptive controller produced the throw
     float aim_below_gr;         // Aim offset used for the throw, without the learned stop bias
+    float stop_predicted_gr;    // Predicted final weight at the main stop, NAN if unknown
 } trickle_throw_result_t;
 
 
@@ -274,6 +277,32 @@ typedef struct {
 #define TRICKLE_TOPUP_TRAIN     1       // Short pulses, after each one check the prediction
 
 extern trickle_tuning_t trickle_tuning;
+
+/*
+ * Fine tube reverse after a fine stop, tuned per profile. Pulling back the
+ * kernels on the tube lip stops them from dribbling into the pan, but turning
+ * back too far can throw kernels out. The candidates are tried in turn and
+ * judged by how far the settled weight ends up from the prediction at the
+ * stop (mean square), then the best one is used with an occasional re-check.
+ */
+#define TRICKLE_REVERSE_CANDIDATES      3
+#define TRICKLE_REVERSE_MIN_SAMPLES     6       // Charges per candidate before choosing
+
+// Compact, it is stored per profile in the EEPROM
+typedef struct {
+    uint8_t current;            // Index of the candidate used for the current charge
+    uint8_t count[TRICKLE_REVERSE_CANDIDATES];
+    uint16_t charges;
+    uint16_t msq_ugr2[TRICKLE_REVERSE_CANDIDATES];  // Mean square of settled - predicted (1e-6 gr^2)
+    int16_t mean_dmgr[TRICKLE_REVERSE_CANDIDATES];  // Mean of settled - predicted (1e-4 gr): dribble after a fine stop
+} trickle_reverse_state_t;
+
+void trickle_reverse_reset(trickle_reverse_state_t * state);
+uint8_t trickle_reverse_choose(trickle_reverse_state_t * state);
+void trickle_reverse_update(trickle_reverse_state_t * state, float stop_error_gr);
+float trickle_reverse_candidate_revs(uint8_t idx);
+uint8_t trickle_reverse_best(const trickle_reverse_state_t * state);
+float trickle_reverse_expected_rise_gr(const trickle_reverse_state_t * state);
 
 // Kernel weight from the kernel by kernel noise of the fine flow in a trace,
 // NAN if the trace has no usable fine-only stretch

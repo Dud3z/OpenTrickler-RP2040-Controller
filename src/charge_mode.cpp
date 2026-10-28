@@ -78,7 +78,7 @@ static TickType_t coarse_backoff_end_tick = 0;
 #define CHARGE_MODE_TAP_SPEED_RPS       1.0f    // Slow enough for single kernels, fast enough to be precise in time
 #define CHARGE_MODE_TAP_SETTLE_MS       1500    // Wait for the kernels to land before judging again
 #define CHARGE_MODE_TAP_MAX_QUEUE       5
-#define CHARGE_MODE_FINE_REVERSE_RPS    2.0f    // Speed of the fine tube reverse after a fine stop
+#define CHARGE_MODE_FINE_REVERSE_RPS    1.0f    // Speed of the fine tube reverse after a fine stop
 static volatile uint8_t tap_requests = 0;
 static volatile bool tap_allowed = false;
 
@@ -98,6 +98,24 @@ static void charge_mode_tap_fine_trickler() {
     }
 
     motor_set_speed(SELECT_FINE_TRICKLER_MOTOR, speed);
+    vTaskDelay(pdMS_TO_TICKS(duration_ms));
+    motor_set_speed(SELECT_FINE_TRICKLER_MOTOR, 0);
+}
+
+// Fine tube reverse right after a fine stop, timed exactly (the charge loop
+// only runs at the scale rate, which made the reverse far too long)
+static void charge_mode_reverse_fine_trickler(float revs, const trickle_motor_limits_t * limits) {
+    float speed = fminf(fmaxf(CHARGE_MODE_FINE_REVERSE_RPS, limits->fine_min_rps), limits->fine_max_rps);
+    if (revs <= 0.0f || speed <= 0.0f) {
+        return;
+    }
+
+    uint32_t duration_ms = (uint32_t) (revs / speed * 1000.0f + 0.5f);
+    if (duration_ms < 1) {
+        duration_ms = 1;
+    }
+
+    motor_set_speed(SELECT_FINE_TRICKLER_MOTOR, -speed);
     vTaskDelay(pdMS_TO_TICKS(duration_ms));
     motor_set_speed(SELECT_FINE_TRICKLER_MOTOR, 0);
 }
@@ -407,11 +425,8 @@ static void charge_mode_wait_for_complete_adaptive() {
     // the controller's own ramp down must not restart it
     bool coarse_stop_hold = false;
 
-    // Fine tube reverse after each fine stop (anti-dribble)
+    // Fine tube reverse after each fine stop (anti-dribble), chosen per throw
     float fine_reverse_revs = ai_trickle_fine_reverse_revs();
-    float fine_reverse_rps = fminf(fmaxf(CHARGE_MODE_FINE_REVERSE_RPS, limits.fine_min_rps), limits.fine_max_rps);
-    bool fine_reverse_in_progress = false;
-    TickType_t fine_reverse_end_tick = 0;
 
     while (true) {
         // Non block waiting for the input
@@ -456,17 +471,9 @@ static void charge_mode_wait_for_complete_adaptive() {
             coarse_trickler_backoff(limits.coarse_min_rps);
         }
 
-        if ((events & TRICKLE_EVENT_FINE_STOPPED) && fine_reverse_revs > 0.0f && fine_reverse_rps > 0.0f) {
-            motor_set_speed(SELECT_FINE_TRICKLER_MOTOR, -fine_reverse_rps);
-            sent_fine_rps = -fine_reverse_rps;
-            fine_reverse_in_progress = true;
-            fine_reverse_end_tick = xTaskGetTickCount() + pdMS_TO_TICKS((uint32_t) (fine_reverse_revs / fine_reverse_rps * 1000.0f));
-        }
-        if (fine_reverse_in_progress && (xTaskGetTickCount() >= fine_reverse_end_tick || fine_rps > 0.0f)) {
-            // Done, or a top up needs the fine tube again
-            motor_set_speed(SELECT_FINE_TRICKLER_MOTOR, 0);
+        if ((events & TRICKLE_EVENT_FINE_STOPPED) && fine_reverse_revs > 0.0f) {
+            charge_mode_reverse_fine_trickler(fine_reverse_revs, &limits);
             sent_fine_rps = 0.0f;
-            fine_reverse_in_progress = false;
         }
 
         if (coarse_stop_hold && coarse_rps <= 0.0f) {
@@ -476,7 +483,7 @@ static void charge_mode_wait_for_complete_adaptive() {
             motor_set_speed(SELECT_COARSE_TRICKLER_MOTOR, coarse_rps);
             sent_coarse_rps = coarse_rps;
         }
-        if (!fine_reverse_in_progress && fine_rps != sent_fine_rps) {
+        if (fine_rps != sent_fine_rps) {
             motor_set_speed(SELECT_FINE_TRICKLER_MOTOR, fine_rps);
             sent_fine_rps = fine_rps;
         }
@@ -492,7 +499,6 @@ static void charge_mode_wait_for_complete_adaptive() {
             sent_coarse_rps = 0.0f;
             sent_fine_rps = 0.0f;
             coarse_stop_hold = false;
-            fine_reverse_in_progress = false;
             coarse_backoff_in_progress = false;
 
             // Most likely the hopper ran empty: wait for the user
@@ -531,13 +537,6 @@ static void charge_mode_wait_for_complete_adaptive() {
         }
 
         if (phase == TRICKLE_PHASE_DONE) {
-            // Let a reverse that just started finish
-            if (fine_reverse_in_progress) {
-                TickType_t now = xTaskGetTickCount();
-                if (fine_reverse_end_tick > now) {
-                    vTaskDelay(fine_reverse_end_tick - now);
-                }
-            }
             break;
         }
     }

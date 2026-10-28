@@ -132,7 +132,10 @@ From speed 50 on, a top up starts as soon as the scale shows the charge is clear
 
 ### Fine tube reverse, kernel weight, tolerance per profile
 
-* **Fine tube reverse:** after every fine stop (main stop and each top up) the fine tube turns back by 0.1 revolution by default, so kernels sitting on the tube lip are pulled back instead of dribbling into the pan while the scale settles. Set under *Settings* → **AI Trickle** (0 = off). In the simulator with a few kernels of dribble per stop, this brought the charges within tolerance from 79% back to 91%; without dribble it costs nothing, since it runs while the scale settles anyway.
+* **Fine tube reverse:** after every fine stop (main stop and each top up) the fine tube turns back a little, so kernels sitting on the tube lip are pulled back instead of dribbling into the pan while the scale settles. Too much reverse does the opposite and flicks kernels out of the tube, so the reverse is now timed exactly (at 1 rev/s, independent of the scale rate) and is short. Set it under *Settings* → **AI Trickle**:
+  * **Auto** (default): per profile the charges try 0, 0.02 and 0.05 rev (6 charges each, later every 10th charge re-checks one) and keep the one with the least dribble after the stop. The dribble that remains is learned as well and taken into account when sizing the top ups. The page shows the value in use, the best one so far and how many charges each candidate had.
+  * **Off**, or a **fixed** value from 0.01 to 0.3 rev.
+  * Changing the setting, or resetting the model of a profile, starts the reverse learning again. In the simulator with a few kernels of dribble per stop, Auto reached about the speed and accuracy of the best fixed value per powder; 0.1 rev was clearly worse than no reverse at all.
 * **Kernel weight:** after each charge the trickler estimates the weight of a kernel (or typical clump) from the kernel-by-kernel noise of the fine flow. It is rough: clumpy powders read high, ball powder reads low. If it is heavier than the tolerance, the AI page and the settings warn you: single kernels decide, finish such charges with **Tap** or widen the tolerance.
 * **Tolerance per profile:** the tolerance is stored per profile (web page and display edit the selected profile). Profiles that never set one use the last tolerance set anywhere.
 

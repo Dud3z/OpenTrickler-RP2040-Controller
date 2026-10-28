@@ -460,9 +460,24 @@
                             </div>
 
                             <div class="grid grid-cols-1 gap-1">
-                                <span class="label-text">Fine Tube Reverse After Each Stop (revolutions, 0 = off)</span>
-                                <input type="number" class="input input-bordered" name="a8" step="0.01" min="0" max="1">
-                                <span class="text-sm opacity-80">Pulls kernels on the tube lip back in so they do not dribble into the pan while the scale settles. Default 0.1.</span>
+                                <span class="label-text">Fine Tube Reverse After Each Stop</span>
+                                <select class="select select-bordered" name="a8">
+                                    <option value="auto">Auto (learned per profile)</option>
+                                    <option value="off">Off</option>
+                                    <option value="0.01">0.01 rev</option>
+                                    <option value="0.02">0.02 rev</option>
+                                    <option value="0.03">0.03 rev</option>
+                                    <option value="0.04">0.04 rev</option>
+                                    <option value="0.05">0.05 rev</option>
+                                    <option value="0.06">0.06 rev</option>
+                                    <option value="0.08">0.08 rev</option>
+                                    <option value="0.10">0.10 rev</option>
+                                    <option value="0.15">0.15 rev</option>
+                                    <option value="0.20">0.20 rev</option>
+                                    <option value="0.30">0.30 rev</option>
+                                </select>
+                                <span class="text-sm opacity-80">Pulls kernels on the tube lip back in so they do not dribble into the pan while the scale settles. Too much throws kernels out instead. Auto tries 0, 0.02 and 0.05 rev per profile and keeps the one with the least dribble.</span>
+                                <span id="aiReverseInfo" class="text-sm opacity-80"></span>
                             </div>
 
                             <div class="grid grid-cols-1 gap-1">
@@ -2097,6 +2112,14 @@
             document.getElementById("aiTapInfo").textContent = (c.tg1 > 0 ?
                 `≈ ${Number(c.tg1).toFixed(3)} gr per tap with the learned model of ${c.pn}. The Tap button works after a charge while the cup is still on the scale.` :
                 "The Tap button works after a charge while the cup is still on the scale.") + kernelNote;
+            if (c.rv) {
+                const n = c.rv[2] + c.rv[3] + c.rv[4];
+                document.getElementById("aiReverseInfo").textContent = c.a8 === "auto" ?
+                    (n ? `${c.pn}: reverse in use ${Number(c.rv[0]).toFixed(2)} rev, best so far ${Number(c.rv[5]).toFixed(2)} rev ` +
+                         `(charges with 0 / 0.02 / 0.05 rev: ${c.rv[2]} / ${c.rv[3]} / ${c.rv[4]}), dribble after the stop ≈ ${Number(c.rv[1]).toFixed(3)} gr.` :
+                         `${c.pn}: nothing learned yet, the first charges try the candidates.`) :
+                    (c.rv[2] ? `${c.pn}: dribble after the stop ≈ ${Number(c.rv[1]).toFixed(3)} gr (${c.rv[2]} charges).` : "");
+            }
             info.innerHTML =
                 `Profile <b>${c.pn}</b>: coarse ${c.lim[0]} … <b>${c.lim[1]}</b> rev/s, fine ${c.lim[2]} … <b>${c.lim[3]}</b> rev/s, ` +
                 `motor ramps ${c.acc[0]} / ${c.acc[1]} rev/s²` +

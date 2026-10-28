@@ -81,8 +81,9 @@ static const classic_profile_t classic_profile = {
 
 
 static bool bench_debug = false;
-static float bench_fine_reverse_revs = 0.1f;    // Fine tube reverse after each fine stop (firmware default), 0 = off
-#define BENCH_FINE_REVERSE_RPS  2.0f
+static float bench_fine_reverse_revs = -1.0f;   // Fine tube reverse after each fine stop: < 0 auto (firmware default), 0 off
+#define BENCH_FINE_REVERSE_RPS  1.0f
+static trickle_reverse_state_t * bench_reverse_state = NULL;    // Auto reverse state of the running configuration
 static bool bench_throws = false;
 static bool bench_trace_now = false;
 static int bench_trace_throw = -1;
@@ -255,8 +256,16 @@ static throw_outcome_t run_adaptive(powder_sim_t * sim, const classic_profile_t 
     bool backoff = false;
     float backoff_end = 0.0f;
     bool coarse_stop_hold = false;   // Same as charge_mode.cpp
-    bool fine_reverse = false;
-    float fine_reverse_end = 0.0f;
+    // Reverse of this charge, as ai_trickle.c picks it
+    float reverse_revs = bench_fine_reverse_revs;
+    if (bench_reverse_state) {
+        if (reverse_revs < 0.0f) {
+            reverse_revs = trickle_reverse_candidate_revs(trickle_reverse_choose(bench_reverse_state));
+        }
+        if (getenv("BENCH_NO_RISE") == NULL) {
+            ctrl.mode.stop_rise_gr = trickle_reverse_expected_rise_gr(bench_reverse_state);
+        }
+    }
 
     while (true) {
         float w = next_reading(sim);
@@ -280,17 +289,15 @@ static throw_outcome_t run_adaptive(powder_sim_t * sim, const classic_profile_t 
         if (ctrl.events & TRICKLE_EVENT_TOPUP_STARTED) {
             out.topups += 1;
         }
-        if ((ctrl.events & TRICKLE_EVENT_FINE_STOPPED) && bench_fine_reverse_revs > 0.0f) {
-            fine_reverse = true;
-            fine_reverse_end = now + bench_fine_reverse_revs / BENCH_FINE_REVERSE_RPS;
-        }
-        if (fine_reverse) {
-            if (now >= fine_reverse_end || fine_rps > 0.0f) {
-                fine_reverse = false;
+        if ((ctrl.events & TRICKLE_EVENT_FINE_STOPPED) && reverse_revs > 0.0f) {
+            // Exactly timed, like the firmware: the loop waits for it
+            float reverse_end = sim->t + reverse_revs / BENCH_FINE_REVERSE_RPS;
+            powder_sim_set_motors(sim, coarse_rps, -BENCH_FINE_REVERSE_RPS);
+            float unused;
+            while (sim->t < reverse_end) {
+                powder_sim_step(sim, SIM_DT_S, &unused);
             }
-            else {
-                fine_rps = -BENCH_FINE_REVERSE_RPS;
-            }
+            powder_sim_set_motors(sim, coarse_rps, 0.0f);
         }
         if (ctrl.events & TRICKLE_EVENT_PROBE_DONE) {
             // Learn from the probe pulses before charging the rest
@@ -404,6 +411,10 @@ static void run_config(powder_sim_t * sim, trickle_trace_t * trace, const powder
     }
     trickle_model_reset(&out->model);
 
+    static trickle_reverse_state_t reverse_state;
+    trickle_reverse_reset(&reverse_state);
+    bench_reverse_state = &reverse_state;
+
     // The first throw starts with probe pulses
     trickle_fit_t fit;
     for (int i = 0; i < LEARN_THROWS; i += 1) {
@@ -417,6 +428,9 @@ static void run_config(powder_sim_t * sim, trickle_trace_t * trace, const powder
         trickle_throw_result_t result;
         bench_trace_now = bench_trace_throw < 0 || bench_trace_throw == i;
         throw_outcome_t o = run_adaptive(sim, p, target, &out->model, mode, trace, &result, false);
+        if (!o.fault) {
+            trickle_reverse_update(&reverse_state, result.landing_weight_gr - result.stop_predicted_gr);
+        }
         out->topups += o.topups;
         if (getenv("BENCH_KERNEL")) {
             float k = trickle_estimate_kernel_gr(trace, &out->model);

@@ -47,6 +47,7 @@ typedef struct {
     float fall_jitter_s;        // Spread of the flight time
     float coarse_tail_kernels;  // Mean kernels dropping after the coarse stop
     float fine_tail_kernels;    // Mean kernels dribbling from the fine tube lip after it stops
+    float fine_reverse_eject;   // Kernels thrown out per revolution of fine reverse beyond the first 0.02 rev
 } powder_sim_powder_t;
 
 
@@ -94,6 +95,7 @@ typedef struct {
     bool fine_was_running;
     float pending_fine_tail_kernels;
     float fine_tail_release_t;
+    float fine_reversed_revs;   // Fine reverse since it last ran forward
     float tail_release_t;
 
     // Pan and scale

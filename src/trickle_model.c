@@ -142,6 +142,7 @@ void trickle_mode_params(uint8_t speed, float tolerance_gr, trickle_mode_params_
     params->topup_ratio = lerpf(0.7f, trickle_tuning.topup_ratio, x);
     params->topup_settle_extra_s = lerpf(trickle_tuning.settle_extra_s, trickle_tuning.topup_settle_extra_s, x);
     params->early_topup = trickle_tuning.early_topup && x >= 0.5f;
+    params->stop_rise_gr = 0.0f;
     params->settle_samples = x > 0.5f ? 3 : 4;
 }
 
@@ -500,6 +501,7 @@ void trickle_ctrl_get_result(const trickle_ctrl_t * ctrl, float charge_time_s, t
     result->charge_time_s = charge_time_s;
     result->adaptive = true;
     result->aim_below_gr = ctrl->aim_below_gr;
+    result->stop_predicted_gr = ctrl->stop_predicted_gr;
 }
 
 
@@ -523,6 +525,7 @@ void trickle_ctrl_init(trickle_ctrl_t * ctrl, float target_gr,
     ctrl->t_coarse_stop = -1.0f;
     ctrl->landing_weight_gr = NAN;
     ctrl->final_weight_gr = NAN;
+    ctrl->stop_predicted_gr = NAN;
     ctrl->last_weight_gr = current_weight_gr;
 
     ctrl->flow_check_t = t_now;
@@ -557,6 +560,9 @@ static void ctrl_stop_main(trickle_ctrl_t * ctrl, float t_now) {
         }
     }
     ctrl->events |= TRICKLE_EVENT_MAIN_STOPPED;
+    if (isnan(ctrl->stop_predicted_gr)) {
+        ctrl->stop_predicted_gr = ctrl->predicted_gr;
+    }
     ctrl_enter_settle(ctrl, t_now);
 }
 
@@ -802,7 +808,9 @@ static void ctrl_start_topup(trickle_ctrl_t * ctrl, float t_now, float settled) 
 
     // Slow pulses: less powder in flight, smaller chance that a clump
     // arrives after the pulse ended
-    float revs = ctrl->mode.topup_ratio * amount / ctrl->model.fine_gpr;
+    // Powder that keeps coming after the pulse (dribble) counts towards it
+    float dribble = clampf(ctrl->mode.stop_rise_gr, 0.0f, 0.5f * amount);
+    float revs = ctrl->mode.topup_ratio * (amount - dribble) / ctrl->model.fine_gpr;
     float rps = clampf(revs / ctrl->mode.topup_pulse_s, ctrl->limits.fine_min_rps,
                        ctrl->limits.fine_max_rps * 0.5f);
     ctrl->topup_rps = rps;
@@ -1626,4 +1634,84 @@ float trickle_estimate_kernel_gr(const trickle_trace_t * trace, const trickle_mo
     }
     float m = (float) (sum_excess / sum_delivered);
     return m > 0.0f ? m : 0.0f;
+}
+
+
+// ---------------------------------------------------------------------------
+// Fine tube reverse
+// ---------------------------------------------------------------------------
+
+static const float reverse_candidates_revs[TRICKLE_REVERSE_CANDIDATES] = {0.0f, 0.02f, 0.05f};
+
+
+float trickle_reverse_candidate_revs(uint8_t idx) {
+    return idx < TRICKLE_REVERSE_CANDIDATES ? reverse_candidates_revs[idx] : 0.0f;
+}
+
+
+void trickle_reverse_reset(trickle_reverse_state_t * state) {
+    memset(state, 0x0, sizeof(trickle_reverse_state_t));
+}
+
+
+uint8_t trickle_reverse_best(const trickle_reverse_state_t * state) {
+    uint8_t best = 0;
+    for (uint8_t i = 1; i < TRICKLE_REVERSE_CANDIDATES; i += 1) {
+        if (state->count[i] > 0 && (state->count[best] == 0 || state->msq_ugr2[i] < state->msq_ugr2[best])) {
+            best = i;
+        }
+    }
+    return best;
+}
+
+
+// Dribble expected after a fine stop with the current candidate, 0 if unknown
+float trickle_reverse_expected_rise_gr(const trickle_reverse_state_t * state) {
+    uint8_t i = state->current < TRICKLE_REVERSE_CANDIDATES ? state->current : 0;
+    return state->count[i] >= 3 ? state->mean_dmgr[i] * 1e-4f : 0.0f;
+}
+
+
+uint8_t trickle_reverse_choose(trickle_reverse_state_t * state) {
+    // First give every candidate a few charges
+    uint8_t least = 0;
+    for (uint8_t i = 1; i < TRICKLE_REVERSE_CANDIDATES; i += 1) {
+        if (state->count[i] < state->count[least]) {
+            least = i;
+        }
+    }
+    if (state->count[least] < TRICKLE_REVERSE_MIN_SAMPLES) {
+        state->current = least;
+    }
+    else if (state->charges % 10 == 9) {
+        // Every tenth charge re-checks the candidate with the fewest charges:
+        // powder and humidity change, the best choice may change with them
+        state->current = least;
+    }
+    else {
+        state->current = trickle_reverse_best(state);
+    }
+    return state->current;
+}
+
+
+void trickle_reverse_update(trickle_reverse_state_t * state, float stop_error_gr) {
+    if (isnan(stop_error_gr) || isinf(stop_error_gr) || fabsf(stop_error_gr) > 2.0f) {
+        return;
+    }
+    uint8_t i = state->current < TRICKLE_REVERSE_CANDIDATES ? state->current : 0;
+    if (state->count[i] < 255) {
+        state->count[i] += 1;
+    }
+    float g = 1.0f / (float) state->count[i];
+    if (g < 0.15f) {
+        g = 0.15f;
+    }
+    float msq = lerpf(state->msq_ugr2[i] * 1e-6f, stop_error_gr * stop_error_gr, g);
+    float mean = lerpf(state->mean_dmgr[i] * 1e-4f, stop_error_gr, g);
+    state->msq_ugr2[i] = (uint16_t) clampf(msq * 1e6f + 0.5f, 0.0f, 65535.0f);
+    state->mean_dmgr[i] = (int16_t) clampf(roundf(mean * 1e4f), -32767.0f, 32767.0f);
+    if (state->charges < 0xFFFF) {
+        state->charges += 1;
+    }
 }
