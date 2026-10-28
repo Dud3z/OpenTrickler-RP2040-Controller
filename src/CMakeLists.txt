@@ -25,6 +25,24 @@ add_custom_command(
 add_dependencies("${TARGET_NAME}" generate_web_portal_header)
 
 
+# styles.css: Tailwind / daisyUI classes of the pages, served by the
+# trickler so the pages work without internet (regenerate with
+# scripts/build_css.sh)
+add_custom_target(
+    generate_styles_css_header ALL
+    DEPENDS "${SRC_DIRECTORY}/generated/styles.css.h"
+)
+
+add_custom_command(
+    OUTPUT "${SRC_DIRECTORY}/generated/styles.css.h"
+    DEPENDS "${SRC_DIRECTORY}/html/styles.css"
+    COMMAND "${Python_EXECUTABLE}" "${SCRIPTS_DIRECTORY}/html2header.py" -vv --no-minify --content-type text/css --cache-seconds 86400 -f ${SRC_DIRECTORY}/html/styles.css -o ${SRC_DIRECTORY}/generated/styles.css.h
+    COMMENT "Generating styles.css header"
+)
+
+add_dependencies("${TARGET_NAME}" generate_styles_css_header)
+
+
 # wizard.html
 add_custom_target(
     generate_wizard_header ALL

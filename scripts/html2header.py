@@ -33,13 +33,13 @@ const char html_{lowercase_filename}[] = "{html_string}";
 """
  
 
-def main(input_filepth, output_filepath, skip_minify):
+def main(input_filepth, output_filepath, skip_minify, content_type="text/html", cache_seconds=0):
     logging.debug(f"Input path: {input_filepth}, output path: {output_filepath}")
 
     with open(input_filepth) as fp:
         input_file = fp.read()
 
-    if not skip_minify:
+    if not skip_minify and content_type == "text/html":
         # Minify the HTML with the javascript
         minified_html = minify_html.minify(input_file, 
                                         do_not_minify_doctype=True, 
@@ -52,7 +52,8 @@ def main(input_filepth, output_filepath, skip_minify):
         minified_html = input_file
 
     # Append HTML header
-    minified_html = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n" + minified_html
+    cache_header = f"Cache-Control: max-age={cache_seconds}\r\n" if cache_seconds > 0 else ""
+    minified_html = f"HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\n{cache_header}\r\n" + minified_html
 
     # Escape characters
     escaped_html = minified_html.replace("\\", "\\\\")
@@ -91,6 +92,8 @@ if __name__ == "__main__":
     parser.add_argument('-f', '--input_filepath', help="Filepath to the HTML file that need to be converted to C header", required=True)
     parser.add_argument('-o', '--output_filepath', help="The output filepath that the C header will be written to", required=True)
     parser.add_argument('--no-minify', help="Do not minify the input file", default=False, action='store_true')
+    parser.add_argument('--content-type', help="Content type of the response, e.g. text/css", default="text/html")
+    parser.add_argument('--cache-seconds', help="Let the browser cache the file this long", type=int, default=0)
 
     parser.add_argument('-v', '--verbose', action='count', default=0)
     
@@ -106,4 +109,5 @@ if __name__ == "__main__":
     
     logging.basicConfig(stream=sys.stdout, level=logging_levels[args.verbose])
 
-    main(args.input_filepath, args.output_filepath, skip_minify=args.no_minify)
+    main(args.input_filepath, args.output_filepath, skip_minify=args.no_minify,
+         content_type=args.content_type, cache_seconds=args.cache_seconds)

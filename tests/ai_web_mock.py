@@ -88,6 +88,15 @@ class Handler(BaseHTTPRequestHandler):
         q = {k: v[0] for k, v in parse_qs(url.query).items()}
         STATE['requests'].append(self.path)
 
+        if url.path == '/styles.css':
+            with open(os.path.join(SCRIPT_DIR, '..', 'src', 'html', 'styles.css'), 'rb') as fp:
+                body = fp.read()
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/css')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if url.path in ('/ai', '/'):
             with open(HTML_PATH if url.path == '/ai' else PORTAL_PATH, 'rb') as fp:
                 body = fp.read()

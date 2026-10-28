@@ -88,3 +88,4 @@ tests/sim/trickle_bench
 tests/sim/trickle_test
 tests/sim/trickle_export
 !tests/sim/Makefile
+scripts/css/node_modules/

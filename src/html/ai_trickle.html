@@ -5,13 +5,25 @@
     <meta charset="UTF-8">
     <title>OpenTrickler AI Trickle</title>
 
-    <link href="https://cdn.jsdelivr.net/npm/daisyui@4.7.3/dist/full.min.css" rel="stylesheet" type="text/css" />
-    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Served by the trickler itself (scripts/build_css.sh), works without internet -->
+    <link href="/styles.css" rel="stylesheet" type="text/css" />
 
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <link rel="icon" href="https://raw.githubusercontent.com/eamars/OpenTrickler/main/Resources/favicon.ico">
 
+    <!-- Saved to the home screen it runs like an app -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="OpenTrickler">
+
     <style>
+        /* viewport-fit=cover lets the page run under the notch and status
+           bar of phones: keep the content and the top bars clear of them */
+        body { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+        .navbar.sticky { padding-top: env(safe-area-inset-top); }
+        .safe-top { padding-top: env(safe-area-inset-top); }
+        .drawer-side > .menu { padding-top: calc(0.5rem + env(safe-area-inset-top)); }
         .chart { width: 100%; height: 220px; display: block; }
         .chat-bubble { white-space: pre-wrap; max-width: 100%; }
         .mono { font-variant-numeric: tabular-nums; }

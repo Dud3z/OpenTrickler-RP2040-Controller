@@ -34,6 +34,10 @@ jobs:
         sudo apt-get update
         sudo apt install -y cmake gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential libstdc++-arm-none-eabi-newlib python3
 
+    # Styles of the web pages from the classes they use, so they work offline
+    - name: Build Web Page Styles
+      run: ./scripts/build_css.sh
+
     # Host side tests of the adaptive trickle controller (model, learning, simulator benchmark)
     - name: Run AI Trickle Simulation Tests
       run: make -C tests/sim run

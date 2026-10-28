@@ -22,6 +22,7 @@
 #include "display_mirror.html.h"
 #include "web_portal.html.h"
 #include "wizard.html.h"
+#include "styles.css.h"
 
 
 bool http_404_error(struct fs_file *file, int num_params, char *params[], char *values[]) {
@@ -31,6 +32,19 @@ bool http_404_error(struct fs_file *file, int num_params, char *params[], char *
     file->len = 13;
     file->index = 13;
     file->flags = FS_FILE_FLAGS_HEADER_INCLUDED;
+
+    return true;
+}
+
+
+// Styles of all pages, so they look right without internet (hotspot mode)
+bool http_styles_css(struct fs_file *file, int num_params, char *params[], char *values[]) {
+    size_t len = strlen(html_styles_css);
+
+    file->data = html_styles_css;
+    file->len = len;
+    file->index = len;
+    file->flags = FS_FILE_FLAGS_HEADER_INCLUDED | FS_FILE_FLAGS_HEADER_PERSISTENT;
 
     return true;
 }
@@ -103,6 +117,7 @@ bool rest_endpoints_init(bool default_wizard) {
     rest_register_handler("/rest/servo_gate_config", http_rest_servo_gate_config);
     rest_register_handler("/display_buffer", http_get_display_buffer);
     rest_register_handler("/display_mirror", http_display_mirror);
+    rest_register_handler("/styles.css", http_styles_css);
     rest_register_handler("/ai", http_ai_trickle_page);
     rest_register_handler("/rest/ai_config", http_rest_ai_config);
     rest_register_handler("/rest/ai_model", http_rest_ai_model);
