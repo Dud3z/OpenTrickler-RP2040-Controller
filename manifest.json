@@ -1,0 +1,41 @@
+{
+  "build": 491,
+  "commit": "ca396fa194797a172495075ed5474ec108ed0768",
+  "version": "ca396fa",
+  "date": "2026-10-28T22:19:56+00:00",
+  "notes": [
+    "ca396fa Remove the firmware update from the display",
+    "5b6e71f Fix empty web responses: larger lwIP heap, free the TLS state after a check",
+    "1ceda43 Faster web interface: WiFi power save off, fewer and shared requests",
+    "aaa19d1 Safety guards, watchdog with error log, dimming, QR code, update from the display",
+    "e885956 Recipes, session statistics with CSV export, grouped settings pages",
+    "bc6d804 Move fine tube reverse setting to Charge Mode, use it in PID mode too",
+    "3476d2c Shorter, exactly timed fine tube reverse with auto tuning per profile",
+    "bfba06e Fine tube reverse, tolerance per profile, kernel weight estimate",
+    "c126859 Hotspot DNS fix, offline page styles, iPhone safe areas",
+    "d736a73 Working settings for every profile, robust start without motor drivers",
+    "62f1d80 Refuse to charge or learn with a profile whose max speeds are 0",
+    "9e07dfc Faster top ups from speed 50 on, strategy sweep in the benchmark",
+    "7c1c766 Tap button, new profiles and choosing the profile before learning",
+    "e692595 Integrate the AI controller with the motor, servo and portal settings",
+    "943cfdb Move AI settings, scale diagnostics and firmware update into the main settings"
+  ],
+  "files": {
+    "pico2_w.bin": {
+      "size": 1020200,
+      "sha256": "d22ccab5012a2ba1b076f91cb9d4f074ea020d720a578d796497c070cf30e5c3"
+    },
+    "pico2_w.uf2": {
+      "size": 2041344,
+      "sha256": "b92e88066f35c8464155d8be807f63474fff6679f83e2e5ed20b25d5bea92d6b"
+    },
+    "pico2_w_partition_table.uf2": {
+      "size": 512,
+      "sha256": "a30fce13d11f92a2a64af9e8bb65ec055c1ff31155d911624716e42511f66d13"
+    },
+    "pico_w.uf2": {
+      "size": 2080256,
+      "sha256": "5fdd8480dee458b829b310360513d195b29e40218ad11bd85c1cd4f65e3f888c"
+    }
+  }
+}
