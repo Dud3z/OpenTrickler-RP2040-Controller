@@ -1485,8 +1485,17 @@
         })
     }
 
+    let lastPolledState = null;
+    let lastStatusLineState = null;
+
     // Function to poll charge mode status (weight, progress, etc)
     function pollChargeModeStatus() {
+        // A hidden page (other tab, phone screen off) asks nothing
+        if (document.hidden) {
+            clearTimeout(pollSetTimeoutId);
+            pollSetTimeoutId = setTimeout(pollChargeModeStatus, 3000);
+            return;
+        }
         fetch("/rest/charge_mode_state")
         .then(response => {
             return response.json()
@@ -1519,7 +1528,11 @@
             // Update web element
             _setCurrentWeight(current_charge_weight, percentage);
             _setChargeModeStateWidget(charge_mode_state);
-            refreshAiStatusLine();
+            lastPolledState = charge_mode_state;
+            if (sessionPollCounter % 4 == 0 || charge_mode_state != lastStatusLineState) {
+                lastStatusLineState = charge_mode_state;
+                refreshAiStatusLine();
+            }
 
             profileName = document.getElementById("profileName");
             profileName.innerText = String(profile_name);
@@ -1566,9 +1579,11 @@
             _setChargeModeStateWidget(ChargeModeState.WAIT);
         })
         .finally(() => {
-            // Schedule the next event
+            // Schedule the next event: fast while charging (live weight),
+            // slower otherwise, and nothing while the page is not visible
             clearTimeout(pollSetTimeoutId);
-            pollSetTimeoutId = setTimeout(pollChargeModeStatus, 500);
+            pollSetTimeoutId = setTimeout(pollChargeModeStatus, document.hidden ? 3000 :
+                                          (lastPolledState == ChargeModeState.CHARGING ? 500 : 1000));
         })
     }
 
@@ -3032,12 +3047,49 @@
         return (v === null || v === undefined || Number.isNaN(v)) ? "-" : (v >= 0 ? "+" : "") + Number(v).toFixed(digits);
     }
 
-    async function getJson(uri) {
-        const response = await fetch(uri, {cache: "no-store"});
+    // The trickler answers one request after the other: the same read asked
+    // for twice at once (or within a second) goes out once. A request with
+    // parameters may change settings, it always goes out and clears the cache.
+    const jsonCache = new Map();
+    const JSON_CACHE_MS = 1000;
+
+    // Reads: no parameters, or only the profile to read / the history start
+    function isReadOnlyRequest(u) {
+        return !String(u).includes("?") || /\?(pf=\d+&ro=true|since=\d+)$/.test(u);
+    }
+
+    // Every other request (also plain fetch calls) may change something: the cache is cleared
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = (input, init) => {
+        const u = typeof input === "string" ? input : (input && input.url) || String(input);
+        if (!isReadOnlyRequest(u)) {
+            jsonCache.clear();
+        }
+        return nativeFetch(input, init);
+    };
+
+    async function fetchJson(uri) {
+        const response = await nativeFetch(uri, {cache: "no-store"});
         if (!response.ok) {
             throw new Error(String(response.status));
         }
         return response.json();
+    }
+
+    function getJson(uri) {
+        const readOnly = isReadOnlyRequest(uri);
+        if (!readOnly) {
+            jsonCache.clear();
+            return fetchJson(uri);
+        }
+        const hit = jsonCache.get(uri);
+        if (hit && Date.now() - hit.t < JSON_CACHE_MS) {
+            return hit.p.then(data => structuredClone(data));
+        }
+        const promise = fetchJson(uri);
+        jsonCache.set(uri, {t: Date.now(), p: promise});
+        promise.catch(() => jsonCache.delete(uri));
+        return promise.then(data => structuredClone(data));
     }
 
     async function startScaleDiag() {
@@ -3342,6 +3394,13 @@
     }
 
     window.addEventListener("hashchange", onPageLoaded);
+
+    // Back on the page: current values at once
+    document.addEventListener("visibilitychange", () => {
+        if (!document.hidden && document.getElementById("sectionTrickler").style.display != "none") {
+            _restartPoll();
+        }
+    });
 
     // Start the long polling process when the page loads
     if (document.readyState != "loading") {

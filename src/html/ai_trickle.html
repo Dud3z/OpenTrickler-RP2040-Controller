@@ -534,12 +534,47 @@ function clearLog() {
     renderHistory();
 }
 
-async function getJson(url) {
-    const response = await fetch(url);
+// The trickler answers one request after the other: the same read asked for
+// twice at once (or within a second) goes out once. Writes clear the cache.
+const jsonCache = new Map();
+
+// Reads: no parameters, or only the profile to read / the history start
+function isReadOnlyRequest(u) {
+    return !String(u).includes("?") || /\?(pf=\d+&ro=true|since=\d+)$/.test(u);
+}
+
+// Every other request (also plain fetch calls) may change something: the cache is cleared
+const nativeFetch = window.fetch.bind(window);
+window.fetch = (input, init) => {
+    const u = typeof input === "string" ? input : (input && input.url) || String(input);
+    if (!isReadOnlyRequest(u)) {
+        jsonCache.clear();
+    }
+    return nativeFetch(input, init);
+};
+
+async function fetchJson(url) {
+    const response = await nativeFetch(url, {cache: "no-store"});
     if (!response.ok) {
         throw new Error(url + ": " + response.status);
     }
     return response.json();
+}
+
+function getJson(url) {
+    const readOnly = isReadOnlyRequest(url);
+    if (!readOnly) {
+        jsonCache.clear();
+        return fetchJson(url);
+    }
+    const hit = jsonCache.get(url);
+    if (hit && Date.now() - hit.t < 1000) {
+        return hit.p.then(data => structuredClone(data));
+    }
+    const promise = fetchJson(url);
+    jsonCache.set(url, {t: Date.now(), p: promise});
+    promise.catch(() => jsonCache.delete(url));
+    return promise.then(data => structuredClone(data));
 }
 
 function toast(text, kind) {
@@ -625,6 +660,11 @@ let pollCounter = 0;
 let lastStatusSeq = -1;
 
 async function poll() {
+    // A hidden page (other tab, phone screen off) asks nothing
+    if (document.hidden) {
+        setTimeout(poll, 3000);
+        return;
+    }
     try {
         state.status = await getJson("/rest/ai_status");
         renderStatus();
@@ -640,7 +680,7 @@ async function poll() {
             // Live trace while charging
             await refreshTrace();
         }
-        if (pollCounter % 2 === 0) {
+        if (pollCounter % 4 === 0 || (state.series && state.series.sa)) {
             await refreshSeries();
         }
         pollCounter += 1;

@@ -402,6 +402,14 @@ void wireless_task(void *p) {
                                                       wireless_config.eeprom_wireless_metadata.timeout_ms);
             if (resp == PICO_OK) {
                 wireless_config.current_wireless_state = WIRELESS_STATE_STA_MODE_LISTEN;
+
+                // The SDK default power save lets the radio sleep 200 ms after
+                // the last packet and wake with the next router beacon: every
+                // request of the web page waits for it. The trickler runs on
+                // a power supply, so keep the radio awake.
+                cyw43_arch_lwip_begin();
+                cyw43_wifi_pm(&cyw43_state, CYW43_NONE_PM);
+                cyw43_arch_lwip_end();
                 break;
             }
             else {
