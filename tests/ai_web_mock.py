@@ -226,7 +226,8 @@ class Handler(BaseHTTPRequestHandler):
                             'min': -0.04, 'max': 0.04, 'jump': 0.04, 'res': 0.02})
             self.send_json(out)
         elif url.path == '/rest/profile_summary':
-            self.send_json({'s0': {str(i): NAMES[i] for i in range(8)}, 's1': STATE['selected']})
+            self.send_json({'s0': {str(i): NAMES[i] for i in range(8)}, 's1': STATE['selected'],
+                            's2': [0 if n == f'Profile{i}' else 1 for i, n in enumerate(NAMES)]})
         elif url.path == '/rest/fw_info':
             fw = STATE['fw']
             if fw['st'] == 'rebooting':

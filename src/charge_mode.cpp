@@ -524,7 +524,42 @@ static void charge_mode_wait_for_complete_adaptive() {
 }
 
 
+// A profile with a max speed of 0 (e.g. an unused slot) cannot charge: say so
+// instead of waiting with standing motors
+static bool charge_mode_check_profile() {
+    trickle_motor_limits_t limits;
+    charge_mode_get_trickler_limits(&limits);
+    if (limits.coarse_max_rps > 0.0f && limits.fine_max_rps > 0.0f) {
+        return true;
+    }
+
+    snprintf(title_string, sizeof(title_string), "Profile not set up");
+    snprintf(status_string, sizeof(status_string), "Max speed is 0, press to exit");
+    neopixel_led_set_colour(
+        neopixel_led_config.eeprom_neopixel_led_metadata.default_led_colours.mini12864_backlight_colour,
+        charge_mode_config.eeprom_charge_mode_data.neopixel_over_charge_colour,
+        charge_mode_config.eeprom_charge_mode_data.neopixel_over_charge_colour,
+        true
+    );
+    ai_trickle_learn_stop();
+    ai_trickle_series_stop();
+
+    while (true) {
+        ButtonEncoderEvent_t event = button_wait_for_input(true);
+        if (event == BUTTON_RST_PRESSED || event == BUTTON_ENCODER_PRESSED) {
+            break;
+        }
+    }
+    charge_mode_config.charge_mode_state = CHARGE_MODE_EXIT;
+    return false;
+}
+
+
 void charge_mode_wait_for_complete() {
+    if (!charge_mode_check_profile()) {
+        return;
+    }
+
     last_charge_adaptive = ai_trickle_adaptive_active();
     if (last_charge_adaptive) {
         charge_mode_wait_for_complete_adaptive();

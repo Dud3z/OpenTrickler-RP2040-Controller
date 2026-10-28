@@ -328,6 +328,7 @@ const I18N = {
         learnHasModel: "Dieses Profil hat schon ein gelerntes Modell ({n} Würfe). Ein anderes Pulver hier einzulernen überschreibt es.",
         learnConfirmOverwrite: "Profil \"{name}\" hat schon ein gelerntes Modell ({n} Würfe). Wirklich dasselbe Pulver weiterlernen? Bei einem anderen Pulver besser ein neues Profil anlegen.",
         learnNeedName: "Bitte einen Namen für das neue Profil eingeben.",
+        learnNoSpeeds: "Dieses Profil hat keine Drehzahlen (Max = 0). Unter Settings → Profiles Grob/Fein Max setzen oder ein neues Profil anlegen.",
         learnNoSlot: "Alle 8 Profile sind belegt. Unter Settings → Profiles ein Profil überschreiben.",
         learnHelp: "Der Trickler wirft Probe-Pulse und mehrere Ladungen, misst dabei Fördermenge, Fallzeit, Nachlauf und Streuung und stellt sich selbst ein. Leere die Waagschale nach jedem Wurf.",
         chargeWeight: "Ladung (gr)", throws: "Würfe", stop: "Stopp", startLearning: "Lernen starten",
@@ -374,6 +375,7 @@ const I18N = {
         learnHasModel: "This profile already has a learned model ({n} throws). Learning a different powder here overwrites it.",
         learnConfirmOverwrite: "Profile \"{name}\" already has a learned model ({n} throws). Really keep learning the same powder? For a different powder better create a new profile.",
         learnNeedName: "Please enter a name for the new profile.",
+        learnNoSpeeds: "This profile has no speeds (max = 0). Set coarse/fine max under Settings → Profiles or create a new profile.",
         learnNoSlot: "All 8 profiles are in use. Overwrite one under Settings → Profiles.",
         learnHelp: "The trickler throws probe pulses and several charges, measures flow per revolution, flight time, tail and spread, and tunes itself. Empty the pan after each throw.",
         chargeWeight: "Charge (gr)", throws: "Throws", stop: "Stop", startLearning: "Start learning",
@@ -706,7 +708,12 @@ async function startLearning() {
             }
         }
         await getJson(`/rest/ai_config?a3=${throws}&ee=true`);
-        await getJson(`/rest/ai_learn?s0=${encodeURIComponent(weight)}&n=${throws}&go=true`);
+        const learn = await getJson(`/rest/ai_learn?s0=${encodeURIComponent(weight)}&n=${throws}&go=true`);
+        if (learn.err) {
+            toast(learn.err.startsWith("Profile not set up") ? t("learnNoSpeeds") : learn.err, "error");
+            await refreshConfig();
+            return;
+        }
         await refreshConfig();
         await refreshProfiles();
         toast(t("saved"));
@@ -1623,7 +1630,10 @@ async function refreshProfiles() {
 
         const target = document.getElementById("learnTarget");
         const previous = target.value;
+        // Unused slots (max speeds 0) cannot charge, so they are no learning target
+        const usable = summary.s2 || [];
         target.innerHTML = Object.keys(summary.s0)
+            .filter(i => usable[i] !== 0 || Number(i) === current)
             .map(i => `<option value="${i}">#${i} ${summary.s0[i]}${Number(i) === current ? " (" + t("learnCurrent") + ")" : ""}</option>`).join("") +
             `<option value="new">${t("learnNew")}</option>`;
         target.value = previous && [...target.options].some(o => o.value === previous) ? previous : String(current);

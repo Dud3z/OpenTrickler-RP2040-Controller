@@ -1162,11 +1162,13 @@ bool http_rest_ai_learn(struct fs_file *file, int num_params, char *params[], ch
     // n (int): number of throws
     // go (bool): start a learning session (enters charge mode if needed)
     // stop (bool): end the learning session
-    static char buf[160];
+    // Response adds err (str): why the session did not start
+    static char buf[200];
     bool go = false;
     bool stop = false;
     uint8_t throws = 0;
     float target = NAN;
+    const char * error = "";
 
     for (int idx = 0; idx < num_params; idx += 1) {
         if (strcmp(params[idx], "s0") == 0) {
@@ -1187,6 +1189,12 @@ bool http_rest_ai_learn(struct fs_file *file, int num_params, char *params[], ch
         ai_trickle_learn_stop();
     }
 
+    if (go && !profile_is_usable(&profile_data.profiles[selected_profile_idx()])) {
+        // Learning with standing motors would only wait for the timeout
+        error = "Profile not set up: max speed is 0";
+        go = false;
+    }
+
     if (go) {
         if (!isnan(target) && target > 0.0f) {
             charge_mode_config.target_charge_weight = target;
@@ -1203,12 +1211,13 @@ bool http_rest_ai_learn(struct fs_file *file, int num_params, char *params[], ch
     }
 
     snprintf(buf, sizeof(buf),
-             "%s{\"la\":%s,\"ld\":%d,\"lt\":%d,\"tg\":%.3f}",
+             "%s{\"la\":%s,\"ld\":%d,\"lt\":%d,\"tg\":%.3f,\"err\":\"%s\"}",
              http_json_header,
              boolean_to_string(learn_active),
              learn_done,
              learn_total,
-             charge_mode_config.target_charge_weight);
+             charge_mode_config.target_charge_weight,
+             error);
 
     rest_set_response(file, buf);
     return true;

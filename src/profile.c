@@ -124,6 +124,12 @@ bool profile_data_init() {
 }
 
 
+// A profile can only charge when both tricklers are allowed to turn
+bool profile_is_usable(const profile_t * profile) {
+    return profile->coarse_max_flow_speed_rps > 0.0f && profile->fine_max_flow_speed_rps > 0.0f;
+}
+
+
 uint16_t profile_get_selected_idx() {
     return profile_data.current_profile_idx;
 }
@@ -342,6 +348,11 @@ bool http_rest_profile_new(struct fs_file *file, int num_params, char *params[],
         if (slot != from) {
             profile_data.profiles[slot] = profile_data.profiles[from];
         }
+        if (!profile_is_usable(&profile_data.profiles[from])) {
+            // Copying an empty slot would give a profile that cannot move the
+            // tricklers; start from the AR2209 defaults instead
+            profile_data.profiles[slot] = default_profile_data.profiles[1];
+        }
         memset(profile_data.profiles[slot].name, 0x0, PROFILE_NAME_MAX_LEN);
         strncpy(profile_data.profiles[slot].name, name, PROFILE_NAME_MAX_LEN - 1);
         profile_select((uint8_t) slot);
@@ -371,11 +382,12 @@ bool http_rest_profile_summary(struct fs_file *file, int num_params, char *param
 {
     // It does not take argument
     assert(MAX_PROFILE_CNT <= 8);  // Ensures 256 byte buffer us sufficient
-    static char buf[256];
+    static char buf[320];
 
     // Response
     // s0 (dict): A dictionary of all profiles in {idx: name} format. 
     // s1 (int): The current loaded profile index
+    // s2 (list): 1 if the profile can charge (max speeds set), per index
     memset(buf, 0x0, sizeof(buf));
     const char * item_template = "\"%d\":\"%s\",";
 
@@ -398,9 +410,14 @@ bool http_rest_profile_summary(struct fs_file *file, int num_params, char *param
     buf[char_idx - 1] = '}';
 
     // Append s1
-    snprintf(&buf[char_idx], sizeof(buf) - char_idx,
-             ",\"s1\":%d}", 
-             profile_data.current_profile_idx);
+    char_idx += snprintf(&buf[char_idx], sizeof(buf) - char_idx,
+                         ",\"s1\":%d,\"s2\":[",
+                         profile_data.current_profile_idx);
+    for (uint8_t p_idx = 0; p_idx < MAX_PROFILE_CNT && char_idx < sizeof(buf) - 4; p_idx += 1) {
+        char_idx += snprintf(&buf[char_idx], sizeof(buf) - char_idx, "%s%d",
+                             p_idx ? "," : "", profile_is_usable(&profile_data.profiles[p_idx]) ? 1 : 0);
+    }
+    snprintf(&buf[char_idx], sizeof(buf) - char_idx, "]}");
 
     size_t response_len = strlen(buf);
     file->data = buf;

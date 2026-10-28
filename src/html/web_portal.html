@@ -221,6 +221,7 @@
                                     </svg>
                                     <a href="https://github.com/eamars/OpenTrickler/blob/main/Manual/tuning_guide.md" class="link">Powder Profile Tuning Guide</a>
                                 </div>
+                                <div id="profileSpeedWarning" role="alert" class="alert alert-warning text-sm" style="display: none;">This profile has a max flow speed of 0 and cannot charge. Set the coarse and fine max speeds below, or use New Profile to start from working settings.</div>
                                 <span class="label-text text-sm opacity-80">With AI Trickle enabled, the Kp/Ki/Kd values are not used. The min/max flow speeds are used by both controllers, the max speeds limit the charge time the most.</span>
 
                                 <span class="label-text">Select Profile</span>
@@ -1606,6 +1607,7 @@
 
     // Function to retrieve the profile values when the index is updated
     function populateProfileSelection(select) {
+        renderProfileNames();
         const profileIdx = select.value;
         const form = select.form;
 
@@ -1944,10 +1946,13 @@
         try {
             const summary = await getJson("/rest/profile_summary");
             const select = document.getElementById("select_profile_option");
+            const usable = summary.s2 || [];
             for (const option of select.options) {
                 const name = summary.s0[option.value];
-                option.textContent = `#${option.value} ${name || ""}`;
+                option.textContent = `#${option.value} ${name || ""}${usable[option.value] === 0 ? " (not set up)" : ""}`;
             }
+            const warning = document.getElementById("profileSpeedWarning");
+            warning.style.display = usable[select.value] === 0 ? "" : "none";
         } catch (e) {
             console.warn(e);
         }
