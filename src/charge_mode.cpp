@@ -22,6 +22,8 @@
 #include "common.h"
 #include "servo_gate.h"
 #include "ai_trickle.h"
+#include "feature_config.h"
+#include "charge_guard.h"
 
 
 uint8_t charge_weight_digits[] = {0, 0, 0, 0, 0};
@@ -168,6 +170,7 @@ typedef enum {
     CHARGE_MODE_EVENT_NO_EVENT = (1 << 0),
     CHARGE_MODE_EVENT_UNDER_CHARGE = (1 << 1),
     CHARGE_MODE_EVENT_OVER_CHARGE = (1 << 2),
+    CHARGE_MODE_EVENT_PAN_REMOVED = (1 << 3),
 } ChargeModeEventBit_t;
 
 
@@ -388,6 +391,95 @@ static void charge_mode_set_charging_title(trickle_phase_t phase) {
 }
 
 
+// Charge guards (charge_guard.c): pan lifted, table bumped
+#define CHARGE_GUARD_STABLE_SAMPLES     5
+#define CHARGE_GUARD_MAX_WAIT_MS        60000   // Give up waiting for a stable scale (then the controller copes)
+
+static uint32_t guard_now_ms(void) {
+    return (uint32_t) (xTaskGetTickCount() * portTICK_PERIOD_MS);
+}
+
+static charge_guard_result_t guard_check(charge_guard_t * guard, float weight, bool coarse_running) {
+    charge_guard_config_t config = {
+        .pan_guard = feature_config.pan_guard,
+        .bump_guard = feature_config.bump_guard,
+        .bump_drop_gr = feature_config.bump_drop_cgr * 0.01f,
+    };
+    return charge_guard_check(guard, &config, weight, coarse_running, guard_now_ms());
+}
+
+static void charge_guard_stop_motors(void) {
+    motor_set_speed(SELECT_FINE_TRICKLER_MOTOR, 0);
+    motor_set_speed(SELECT_COARSE_TRICKLER_MOTOR, 0);
+    coarse_backoff_in_progress = false;
+}
+
+// Pan lifted during the charge: the charge is lost
+static void charge_guard_pan_removed(void) {
+    charge_guard_stop_motors();
+    if (servo_gate.eeprom_servo_gate_config.servo_gate_enable) {
+        servo_gate_set_ratio(SERVO_GATE_RATIO_CLOSED, false);
+    }
+    last_charge_elapsed_seconds = (float) ((xTaskGetTickCount() - charge_start_tick) * portTICK_PERIOD_MS) / 1000.0f;
+
+    snprintf(title_string, sizeof(title_string), "Pan removed!");
+    snprintf(status_string, sizeof(status_string), "Aborted, empty the pan");
+    neopixel_led_set_colour(
+        neopixel_led_config.eeprom_neopixel_led_metadata.default_led_colours.mini12864_backlight_colour,
+        charge_mode_config.eeprom_charge_mode_data.neopixel_over_charge_colour,
+        charge_mode_config.eeprom_charge_mode_data.neopixel_over_charge_colour,
+        true
+    );
+    charge_mode_config.charge_mode_event |= CHARGE_MODE_EVENT_PAN_REMOVED;
+
+    // Wait for the empty pan, then zero as for every charge
+    charge_mode_config.charge_mode_state = CHARGE_MODE_WAIT_FOR_CUP_RETURN;
+}
+
+/*
+ * Bump: motors stopped, wait until the scale is stable. Returns the stable
+ * weight, or NAN when the user left the charge mode (or the pan was lifted:
+ * then the state is set already).
+ */
+static float charge_guard_wait_stable(void) {
+    charge_guard_stop_motors();
+
+    char saved_status[sizeof(status_string)];
+    strncpy(saved_status, status_string, sizeof(saved_status));
+    snprintf(status_string, sizeof(status_string), "Bump! Waiting for scale");
+
+    FloatRingBuffer data_buffer(CHARGE_GUARD_STABLE_SAMPLES);
+    float sd_limit = fmaxf(charge_mode_config.eeprom_charge_mode_data.set_point_sd_margin, 0.02f);
+    TickType_t start = xTaskGetTickCount();
+
+    while (true) {
+        ButtonEncoderEvent_t event = button_wait_for_input(false);
+        if (event == BUTTON_RST_PRESSED) {
+            charge_mode_config.charge_mode_state = CHARGE_MODE_EXIT;
+            return NAN;
+        }
+
+        float weight;
+        if (!scale_block_wait_for_next_measurement(200, &weight)) {
+            continue;
+        }
+        if (feature_config.pan_guard && weight < -CHARGE_GUARD_PAN_REMOVED_GR) {
+            charge_guard_pan_removed();
+            return NAN;
+        }
+        data_buffer.enqueue(weight);
+
+        bool stable = data_buffer.getCounter() >= CHARGE_GUARD_STABLE_SAMPLES && data_buffer.getSd() < sd_limit;
+        // Still restless after a minute: carry on, the controller copes with the rest
+        bool timeout = xTaskGetTickCount() - start > pdMS_TO_TICKS(CHARGE_GUARD_MAX_WAIT_MS);
+        if (stable || timeout) {
+            strncpy(status_string, saved_status, sizeof(status_string));
+            return data_buffer.getMean();
+        }
+    }
+}
+
+
 /*
  * Adaptive charge: the AI trickle controller predicts the powder in flight
  * and stops ahead of time, then tops up if needed. See trickle_model.h.
@@ -428,6 +520,10 @@ static void charge_mode_wait_for_complete_adaptive() {
     // Fine tube reverse after each fine stop (anti-dribble), chosen per throw
     float fine_reverse_revs = ai_trickle_fine_reverse_revs();
 
+    charge_guard_t guard;
+    charge_guard_reset(&guard, guard_now_ms());
+    trickle_phase_t guard_phase = TRICKLE_PHASE_COARSE;
+
     while (true) {
         // Non block waiting for the input
         ButtonEncoderEvent_t button_encoder_event = button_wait_for_input(false);
@@ -447,6 +543,34 @@ static void charge_mode_wait_for_complete_adaptive() {
         TickType_t current_sample_tick = xTaskGetTickCount();
         float t = charge_elapsed_s(current_sample_tick);
 
+        // Pan lifted or table bumped: before the controller sees the reading
+        bool coarse_running = guard_phase == TRICKLE_PHASE_COARSE || guard_phase == TRICKLE_PHASE_PROBE;
+        charge_guard_result_t guard_result = guard_check(&guard, current_weight, coarse_running);
+        if (guard_result == CHARGE_GUARD_PAN_REMOVED) {
+            // Motors first, then the log
+            charge_guard_pan_removed();
+            ai_trickle_adaptive_end(t);
+            return;
+        }
+        if (guard_result == CHARGE_GUARD_BUMP) {
+            float stable_weight = charge_guard_wait_stable();
+            if (isnan(stable_weight)) {
+                ai_trickle_adaptive_end(charge_elapsed_s(xTaskGetTickCount()));
+                if (charge_mode_config.charge_mode_state == CHARGE_MODE_EXIT) {
+                    ai_trickle_learn_stop();
+                }
+                return;
+            }
+            // Carry on from the stable weight, as after a refill
+            sent_coarse_rps = 0.0f;
+            sent_fine_rps = 0.0f;
+            coarse_stop_hold = false;
+            ai_trickle_adaptive_resume(charge_elapsed_s(xTaskGetTickCount()), stable_weight);
+            charge_guard_reset(&guard, guard_now_ms() + CHARGE_GUARD_COARSE_GRACE_MS);
+            last_phase = TRICKLE_PHASE_DONE;
+            continue;
+        }
+
         // Handle coarse trickler backoff stop
         if (coarse_backoff_in_progress && (current_sample_tick >= coarse_backoff_end_tick)) {
             motor_set_speed(SELECT_COARSE_TRICKLER_MOTOR, 0);
@@ -458,8 +582,11 @@ static void charge_mode_wait_for_complete_adaptive() {
         float fine_rps;
         uint32_t events;
         trickle_phase_t phase = ai_trickle_adaptive_step(t, current_weight, &coarse_rps, &fine_rps, &events);
+        guard_phase = phase;
 
         if (events & TRICKLE_EVENT_COARSE_STOPPED) {
+            // The stream still lands and its push on the pan fades
+            charge_guard_coarse_stopped(&guard, guard_now_ms());
             motor_set_speed(SELECT_COARSE_TRICKLER_MOTOR, 0);
             sent_coarse_rps = 0.0f;
             coarse_stop_hold = true;
@@ -532,6 +659,7 @@ static void charge_mode_wait_for_complete_adaptive() {
                 true
             );
             ai_trickle_adaptive_resume(charge_elapsed_s(xTaskGetTickCount()), scale_get_current_measurement());
+            charge_guard_reset(&guard, guard_now_ms() + CHARGE_GUARD_COARSE_GRACE_MS);
             last_phase = TRICKLE_PHASE_DONE;
             continue;
         }
@@ -660,6 +788,9 @@ void charge_mode_wait_for_complete() {
     ai_trickle_classic_begin();
     float recorded_coarse_rps = 0.0f;
 
+    charge_guard_t guard;
+    charge_guard_reset(&guard, guard_now_ms());
+
     while (true) {
         // Non block waiting for the input
         ButtonEncoderEvent_t button_encoder_event = button_wait_for_input(false);
@@ -676,6 +807,26 @@ void charge_mode_wait_for_complete() {
             continue;
         }
         current_sample_tick = xTaskGetTickCount();
+
+        // Pan lifted or table bumped
+        charge_guard_result_t guard_result = guard_check(&guard, current_weight, should_coarse_trickler_move);
+        if (guard_result == CHARGE_GUARD_PAN_REMOVED) {
+            charge_guard_pan_removed();
+            return;
+        }
+        if (guard_result == CHARGE_GUARD_BUMP) {
+            float stable_weight = charge_guard_wait_stable();
+            if (isnan(stable_weight)) {
+                return;
+            }
+            // Carry on: the PID terms continue from the stable weight
+            current_weight = stable_weight;
+            current_sample_tick = xTaskGetTickCount();
+            last_sample_tick = current_sample_tick - pdMS_TO_TICKS(100);
+            fine_trickler_last_error = charge_mode_config.target_charge_weight - current_weight;
+            coarse_trickler_last_error = coarse_trickler_target_charge_weight - current_weight;
+            charge_guard_reset(&guard, guard_now_ms() + CHARGE_GUARD_COARSE_GRACE_MS);
+        }
 
         // Handle coarse trickler backoff stop
         if (coarse_backoff_in_progress && (current_sample_tick >= coarse_backoff_end_tick)) {
@@ -708,6 +859,7 @@ void charge_mode_wait_for_complete() {
             should_coarse_trickler_move = false;
             motor_set_speed(SELECT_COARSE_TRICKLER_MOTOR, 0);
             recorded_coarse_rps = 0.0f;
+            charge_guard_coarse_stopped(&guard, guard_now_ms());
             ai_trickle_classic_coarse_stop(charge_elapsed_s(current_sample_tick));
 
             // NEW: When the coarse trickler stops, move the servo gate to a configured ratio

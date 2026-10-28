@@ -43,6 +43,30 @@ add_custom_command(
 add_dependencies("${TARGET_NAME}" generate_styles_css_header)
 
 
+# Icons of the web pages (browser tab, iOS home screen), served by the
+# trickler so they work without internet
+add_custom_target(
+    generate_icon_headers ALL
+    DEPENDS "${SRC_DIRECTORY}/generated/favicon.ico.h" "${SRC_DIRECTORY}/generated/apple_touch_icon.png.h"
+)
+
+add_custom_command(
+    OUTPUT "${SRC_DIRECTORY}/generated/favicon.ico.h"
+    DEPENDS "${SRC_DIRECTORY}/html/icons/favicon.ico" "${SCRIPTS_DIRECTORY}/bin2header.py"
+    COMMAND "${Python_EXECUTABLE}" "${SCRIPTS_DIRECTORY}/bin2header.py" -f ${SRC_DIRECTORY}/html/icons/favicon.ico -o ${SRC_DIRECTORY}/generated/favicon.ico.h -n favicon_ico --content-type image/x-icon
+    COMMENT "Generating favicon.ico header"
+)
+
+add_custom_command(
+    OUTPUT "${SRC_DIRECTORY}/generated/apple_touch_icon.png.h"
+    DEPENDS "${SRC_DIRECTORY}/html/icons/apple-touch-icon.png" "${SCRIPTS_DIRECTORY}/bin2header.py"
+    COMMAND "${Python_EXECUTABLE}" "${SCRIPTS_DIRECTORY}/bin2header.py" -f ${SRC_DIRECTORY}/html/icons/apple-touch-icon.png -o ${SRC_DIRECTORY}/generated/apple_touch_icon.png.h -n apple_touch_icon_png --content-type image/png
+    COMMENT "Generating apple-touch-icon.png header"
+)
+
+add_dependencies("${TARGET_NAME}" generate_icon_headers)
+
+
 # wizard.html
 add_custom_target(
     generate_wizard_header ALL

@@ -3,6 +3,7 @@
 #include <queue.h>
 
 #include "mini_12864_module.h"
+#include "neopixel_led.h"
 
 
 extern QueueHandle_t encoder_event_queue;
@@ -26,6 +27,11 @@ ButtonEncoderEvent_t button_wait_for_input(bool block) {
     ButtonEncoderEvent_t button_encoder_event;
     if (!xQueueReceive(encoder_event_queue, &button_encoder_event, delay_ticks)){
         button_encoder_event = BUTTON_NO_EVENT;
+    }
+
+    // A turn or a press wakes the dimmed display (the event still counts)
+    if (button_encoder_event != BUTTON_NO_EVENT) {
+        neopixel_led_activity();
     }
 
     return button_encoder_event;

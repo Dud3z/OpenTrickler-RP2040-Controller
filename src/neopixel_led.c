@@ -30,6 +30,7 @@
 #include "configuration.h"
 #include "eeprom.h"
 #include "common.h"
+#include "feature_config.h"
 
 
 
@@ -92,6 +93,99 @@ void _neopixel_pwm_out_set_colour(uint32_t new_colour) {
 }
 
 
+// Dimming after a while without use (Settings - Display & LEDs): the colours
+// asked for are kept and sent scaled while dimmed
+static rgbw_u32_t requested_backlight;
+static rgbw_u32_t requested_led1;
+static rgbw_u32_t requested_led2;
+static bool colours_requested = false;
+static volatile bool leds_dimmed = false;
+static volatile TickType_t last_activity_tick = 0;
+
+static rgbw_u32_t scale_colour(rgbw_u32_t colour, uint8_t pct) {
+    rgbw_u32_t out;
+    out.r = (uint8_t) ((colour.r * pct + 50) / 100);
+    out.g = (uint8_t) ((colour.g * pct + 50) / 100);
+    out.b = (uint8_t) ((colour.b * pct + 50) / 100);
+    out.w = (uint8_t) ((colour.w * pct + 50) / 100);
+    return out;
+}
+
+
+// Send the requested colours, dimmed or not. The mutex must be held.
+static void neopixel_led_output(void) {
+    rgbw_u32_t backlight = requested_backlight;
+    rgbw_u32_t led1 = requested_led1;
+    rgbw_u32_t led2 = requested_led2;
+    if (leds_dimmed) {
+        backlight = scale_colour(backlight, feature_config.dim_level_pct);
+        led1 = scale_colour(led1, feature_config.dim_level_pct);
+        led2 = scale_colour(led2, feature_config.dim_level_pct);
+    }
+
+    /* Important: do not change the order of LED update operations. 
+       Neopixel LEDs on the same string are updated in the order they are sent. The update order has to be: 
+        1. Encoder RGB1
+        2. Encoder RGB2
+        3. 12864 Backlight
+    */
+    _neopixel_led_set_colour(
+        urgbw_u32(led1, NEOPIXEL_COLOUR_ORDER_GRB),
+        urgbw_u32(led2, NEOPIXEL_COLOUR_ORDER_GRB),
+        urgbw_u32(backlight, NEOPIXEL_COLOUR_ORDER_GRB)
+    );
+
+    /* Update PWM3 output to mirror new_led1_colour */
+    _neopixel_pwm_out_set_colour(
+        urgbw_u32(led1, neopixel_led_config.eeprom_neopixel_led_metadata.pwm_out_led_colour_order)
+    );
+}
+
+
+static void neopixel_led_set_dimmed(bool dimmed) {
+    if (leds_dimmed == dimmed || !colours_requested || neopixel_led_config.mutex == NULL) {
+        leds_dimmed = dimmed && colours_requested;
+        return;
+    }
+    // Never wait here: called from tasks that must not stall
+    if (xSemaphoreTake(neopixel_led_config.mutex, 0) != pdTRUE) {
+        return;
+    }
+    leds_dimmed = dimmed;
+    neopixel_led_output();
+    xSemaphoreGive(neopixel_led_config.mutex);
+}
+
+
+// Something happened (button, charge, setting): full brightness again
+void neopixel_led_activity(void) {
+    last_activity_tick = xTaskGetTickCount();
+    if (leds_dimmed) {
+        neopixel_led_set_dimmed(false);
+    }
+}
+
+
+// Called about once a second: dim after the idle time, unless charging
+void neopixel_led_idle_check(bool busy) {
+    if (busy || !feature_config.dim_enable) {
+        if (busy) {
+            last_activity_tick = xTaskGetTickCount();
+        }
+        neopixel_led_set_dimmed(false);
+        return;
+    }
+    if (!leds_dimmed && xTaskGetTickCount() - last_activity_tick > pdMS_TO_TICKS(feature_config.dim_after_s * 1000u)) {
+        neopixel_led_set_dimmed(true);
+    }
+}
+
+
+bool neopixel_led_is_dimmed(void) {
+    return leds_dimmed;
+}
+
+
 void neopixel_led_set_colour(rgbw_u32_t mini12864_backlight_colour, rgbw_u32_t led1_colour, rgbw_u32_t led2_colour, bool block_wait) {
     // Assign delay time
     TickType_t ticks_to_wait = 0;
@@ -103,27 +197,19 @@ void neopixel_led_set_colour(rgbw_u32_t mini12864_backlight_colour, rgbw_u32_t l
         return;  // unable to take mutex, return immediately
     }
 
-    /* Important: do not change the order of LED update operations. 
-       Neopixel LEDs on the same string are updated in the order they are sent. The update order has to be: 
-        1. Encoder RGB1
-        2. Encoder RGB2
-        3. 12864 Backlight
-    */
-    _neopixel_led_set_colour(
-        urgbw_u32(led1_colour, NEOPIXEL_COLOUR_ORDER_GRB),
-        urgbw_u32(led2_colour, NEOPIXEL_COLOUR_ORDER_GRB),
-        urgbw_u32(mini12864_backlight_colour, NEOPIXEL_COLOUR_ORDER_GRB)
-    );
-
-    /* Update PWM3 output to mirror new_led1_colour */
-    // Infuse white intensity
-    _neopixel_pwm_out_set_colour(
-        urgbw_u32(led1_colour, neopixel_led_config.eeprom_neopixel_led_metadata.pwm_out_led_colour_order)
-    );
+    requested_backlight = mini12864_backlight_colour;
+    requested_led1 = led1_colour;
+    requested_led2 = led2_colour;
+    colours_requested = true;
+    // A mode changing the colours (charge result, ...) is use: full brightness
+    leds_dimmed = false;
+    last_activity_tick = xTaskGetTickCount();
+    neopixel_led_output();
 
     // Release resource
     xSemaphoreGive(neopixel_led_config.mutex);
 }
+
 
 
 bool neopixel_led_init(void) {
@@ -192,6 +278,12 @@ bool neopixel_led_init(void) {
     _neopixel_pwm_out_set_colour(
         urgbw_u32(colour, neopixel_led_config.eeprom_neopixel_led_metadata.pwm_out_led_colour_order)
     );
+
+    // The defaults are what dimming scales until a mode sets its colours
+    requested_backlight = neopixel_led_config.eeprom_neopixel_led_metadata.default_led_colours.mini12864_backlight_colour;
+    requested_led1 = neopixel_led_config.eeprom_neopixel_led_metadata.default_led_colours.led1_colour;
+    requested_led2 = neopixel_led_config.eeprom_neopixel_led_metadata.default_led_colours.led2_colour;
+    colours_requested = true;
 
     // Register to eeprom save all
     eeprom_register_handler(neopixel_led_config_save);

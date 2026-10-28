@@ -122,7 +122,11 @@
 
 #include <assert.h>
 /* Define to trap errors during development. */
-#define configASSERT(x)                         assert(x)
+// A failed check is logged (Settings - System) and restarts the trickler
+#ifndef __ASSEMBLER__
+void error_log_assert(const char * file, int line);
+#endif
+#define configASSERT(x)                         do { if (!(x)) { error_log_assert(__FILE__, __LINE__); } } while (0)
 
 /* Set the following definitions to 1 to include the API function, or zero
 to exclude the API function. */

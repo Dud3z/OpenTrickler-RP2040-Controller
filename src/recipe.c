@@ -105,7 +105,7 @@ const char * recipe_menu_name(void * data, uint16_t idx) {
 }
 
 
-uint16_t recipe_menu_count(void) {
+uint16_t recipe_menu_count(void * data) {
     return recipe_data.count ? recipe_data.count : 1;
 }
 

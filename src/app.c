@@ -29,6 +29,8 @@
 #include "servo_gate.h"
 #include "ai_trickle.h"
 #include "recipe.h"
+#include "feature_config.h"
+#include "system_monitor.h"
 
 
 // Show the init step on the display, so a hang during start up can be located
@@ -50,6 +52,11 @@ int main()
     // stdio_init_all();
     // Initialize EEPROM first
     eeprom_init();
+
+    // Why did the trickler restart last time (error log), then the switches
+    // of the optional functions (used by the modules below)
+    system_monitor_init();
+    feature_config_init();
 
     // Initialize Neopixel RGB on the mini 12864 board
     neopixel_led_init();
@@ -95,6 +102,9 @@ int main()
     // Start menu task
     boot_status("Menu");
     xTaskCreate(menu_task, "Menu Task", 1024, NULL, 6, NULL);
+
+    // Watchdog and housekeeping (dimming)
+    system_monitor_start();
 
     // Start RTOS
     vTaskStartScheduler();

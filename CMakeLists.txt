@@ -78,6 +78,10 @@ add_library(u8g2_mui
 )
 target_link_libraries(u8g2_mui u8g2)
 
+# QR codes on the display (Nayuki QR Code generator, MIT)
+add_library(qrcodegen ${CMAKE_SOURCE_DIR}/library/qrcodegen/qrcodegen.c)
+target_include_directories(qrcodegen PUBLIC ${CMAKE_SOURCE_DIR}/library/qrcodegen)
+
 # Pull in src
 add_subdirectory(${SRC_DIRECTORY})
 
@@ -106,6 +110,7 @@ target_link_libraries("${TARGET_NAME}"
     u8g2_mui
     trinamic
     app_version
+    qrcodegen
 
     # Required by cyw43 wireless module
     pico_cyw43_arch_lwip_sys_freertos
@@ -129,6 +134,9 @@ if (NOT APP_BUILD_NUMBER)
 endif()
 target_compile_definitions("${TARGET_NAME}" PRIVATE APP_BUILD_NUMBER=${APP_BUILD_NUMBER})
 
+# A panic is logged (error log) and restarts the trickler instead of hanging
+target_compile_definitions("${TARGET_NAME}" PRIVATE PICO_PANIC_FUNCTION=error_log_panic)
+
 # Firmware update over WiFi (RP2350): A/B partitions with try-before-you-buy
 if (PICO_RP2350)
     target_link_libraries("${TARGET_NAME}" pico_flash hardware_flash boot_uf2_headers boot_picoboot_headers)
@@ -138,6 +146,18 @@ if (PICO_RP2350)
 
     # The bootrom verifies this hash and refuses a damaged image
     pico_hash_binary("${TARGET_NAME}")
+
+    # The trickler downloads updates from GitHub itself (display menu):
+    # HTTPS client (lwIP http_client + altcp TLS with mbedtls)
+    target_compile_definitions("${TARGET_NAME}" PRIVATE FW_DOWNLOAD=1)
+    target_sources("${TARGET_NAME}" PRIVATE ${PICO_LWIP_PATH}/src/apps/http/http_client.c)
+    target_link_libraries("${TARGET_NAME}" pico_lwip_mbedtls pico_mbedtls)
+
+    # The repository the build comes from (GitHub Actions), its 'firmware'
+    # branch holds the updates
+    if (DEFINED ENV{GITHUB_REPOSITORY})
+        target_compile_definitions("${TARGET_NAME}" PRIVATE FW_UPDATE_REPO="$ENV{GITHUB_REPOSITORY}")
+    endif()
 
     # Partition table, installed once via USB (pt.uf2)
     add_custom_command(TARGET "${TARGET_NAME}" POST_BUILD

@@ -54,6 +54,8 @@ Join our [discord server](https://discord.gg/ZhdThA2vrW) for help and developmen
 
 * Recipes (charge weight + powder profile in one step) and session statistics with CSV export, see [manuals/recipes_statistics_settings.md](manuals/recipes_statistics_settings.md)
 
+* Safety (pan lifted, bumped table), watchdog with error log, display dimming, QR code, firmware update from the display (Pico 2 W), see [manuals/safety_and_system.md](manuals/safety_and_system.md)
+
 * Firmware update over WiFi (Pico 2 W, A/B partitions with automatic rollback)
 
 ## Get Started

@@ -9,13 +9,23 @@
     <link href="/styles.css" rel="stylesheet" type="text/css" />
 
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <link rel="icon" href="https://raw.githubusercontent.com/eamars/OpenTrickler/main/Resources/favicon.ico">
+    <link rel="icon" href="/favicon.ico">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 
     <!-- Saved to the home screen it runs like an app -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="OpenTrickler">
+
+    <script>
+        // Same light / dark design as the portal (Settings top right)
+        (function () {
+            let theme = "auto";
+            try { theme = localStorage.getItem("ot_theme") || "auto"; } catch (e) {}
+            if (theme !== "auto") document.documentElement.setAttribute("data-theme", theme);
+        })();
+    </script>
 
     <style>
         /* viewport-fit=cover lets the page run under the notch and status
@@ -280,6 +290,7 @@
                 <button class="btn btn-outline btn-sm" onclick="askClaude(t('promptOvershoot'))" data-i18n="chipOvershoot">Warum über/unter?</button>
                 <button class="btn btn-outline btn-sm" onclick="askClaude(t('promptFaster'))" data-i18n="chipFaster">Schneller?</button>
                 <button class="btn btn-outline btn-sm" onclick="askPowder()" data-i18n="chipPowder">Neues Pulver</button>
+                <button class="btn btn-outline btn-sm" onclick="askSession()" data-i18n="chipSession">Session auswerten</button>
             </div>
             <div id="chatLog" class="flex flex-col gap-2 mt-2"></div>
             <div class="join w-full mt-2">
@@ -352,7 +363,7 @@ const I18N = {
         assistant: "KI-Assistent (Claude)", apiSetup: "API-Schlüssel und Modell",
         apiNote: "Der Schlüssel wird nur in diesem Browser gespeichert und direkt an die Anthropic API gesendet, nie an den Trickler. Dein Gerät braucht dafür Internet (WLAN-Station-Modus).",
         forget: "Vergessen", analyse: "Würfe analysieren", chipOvershoot: "Warum über/unter?", chipFaster: "Schneller?",
-        chipPowder: "Neues Pulver", chatPlaceholder: "Frage stellen...", send: "Senden",
+        chipPowder: "Neues Pulver", chipSession: "Session auswerten", chatPlaceholder: "Frage stellen...", send: "Senden",
         notLearned: "Nicht gelernt", learning: "Lernt", ready: "Bereit", drift: "Abweichung", converged: "Eingelernt",
         learnIdle: "Kein Lernvorgang aktiv.", learnRunning: "Wurf {done} von {total} – Waagschale nach jedem Wurf leeren.",
         learnDone: "Fertig eingelernt.", saved: "Gespeichert", applied: "Übernommen", failed: "Fehlgeschlagen",
@@ -367,6 +378,8 @@ const I18N = {
         powderQuestion: "Welches Pulver (Name, Form wenn bekannt)?",
         promptAnalyse: "Analysiere bitte meine letzten Würfe und das gelernte Modell. Was läuft gut, was nicht, und welche konkreten Einstellungen würdest du ändern?",
         promptOvershoot: "Warum liegen manche Würfe über und andere unter dem Ziel? Erkläre es anhand meiner Daten.",
+        promptSession: "Werte bitte meine aktuelle Session aus (session_statistics unten): Wie genau und wie schnell war ich, wie hat sich die Streuung im Verlauf entwickelt, gab es Ausreißer oder Muster (Lernwürfe, Nachtrickeln, Abbrüche, einzelne Ladungen/Rezepte)? Was soll ich konkret ändern?",
+        noSession: "In der aktuellen Session gibt es noch keine Ladungen.",
         promptFaster: "Wie kann ich schneller werden, ohne mehr Würfe außerhalb der Toleranz zu bekommen?",
         promptPowder: "Ich wechsle auf das Pulver: {powder}. Worauf muss ich beim Trickler achten und mit welchem Modus/Einstellungen sollte ich das Einlernen beginnen?",
         throwFlags: {adaptive: "AI", learn: "Lernen", probe: "Probe", fault: "Fehler", topups: "Nachtrickeln"},
@@ -401,7 +414,7 @@ const I18N = {
         assistant: "AI assistant (Claude)", apiSetup: "API key and model",
         apiNote: "The key is stored in this browser only and sent directly to the Anthropic API, never to the trickler. This device needs internet access (WiFi station mode).",
         forget: "Forget", analyse: "Analyse throws", chipOvershoot: "Why over/under?", chipFaster: "Faster?",
-        chipPowder: "New powder", chatPlaceholder: "Ask a question...", send: "Send",
+        chipPowder: "New powder", chipSession: "Evaluate session", chatPlaceholder: "Ask a question...", send: "Send",
         notLearned: "Not learned", learning: "Learning", ready: "Ready", drift: "Drift", converged: "Learned",
         learnIdle: "No learning session.", learnRunning: "Throw {done} of {total} - empty the pan after each throw.",
         learnDone: "Learning complete.", saved: "Saved", applied: "Applied", failed: "Failed",
@@ -416,6 +429,8 @@ const I18N = {
         powderQuestion: "Which powder (name, shape if known)?",
         promptAnalyse: "Please analyse my recent throws and the learned model. What works, what doesn't, and which concrete settings would you change?",
         promptOvershoot: "Why are some throws above and others below the target? Explain it using my data.",
+        promptSession: "Please evaluate my current session (session_statistics below): how accurate and how fast was I, how did the spread develop over the session, were there outliers or patterns (learning throws, top ups, aborted charges, single loads/recipes)? What should I change?",
+        noSession: "The current session has no charges yet.",
         promptFaster: "How can I get faster without more throws outside the tolerance?",
         promptPowder: "I am switching to the powder: {powder}. What should I watch out for with the trickler, and which mode/settings should I start learning with?",
         throwFlags: {adaptive: "AI", learn: "Learn", probe: "Probe", fault: "Fault", topups: "Top ups"},
@@ -1354,7 +1369,7 @@ function renderProposal(input) {
     document.getElementById("chatLog").appendChild(card);
 }
 
-async function askClaude(question) {
+async function askClaude(question, extraData) {
     if (claudeBusy) return;
     const key = apiKey();
     if (!key) {
@@ -1377,6 +1392,8 @@ async function askClaude(question) {
             role: "user",
             content: [
                 {type: "text", text: "<device_data>\n" + JSON.stringify(compactContext()) + "\n</device_data>"},
+                // Extra data (session statistics) goes along but is not shown in the chat
+                ...(extraData ? [{type: "text", text: extraData}] : []),
                 {type: "text", text: question},
             ],
         });
@@ -1750,6 +1767,78 @@ async function copyModel() {
     }
 }
 
+
+// ---------------------------------------------------------------------------
+// Session evaluation: the charges since the session started (Trickler page,
+// New Session) with per load statistics, for the assistant
+// ---------------------------------------------------------------------------
+async function sessionStatistics() {
+    const charges = [];
+    let since = 0;
+    let data = null;
+    for (let page = 0; page < 10; page += 1) {
+        data = await getJson("/rest/ai_history?since=" + since);
+        for (const h of data.h) {
+            since = h[0];
+            if (h[0] > data.ss) charges.push(h);
+        }
+        if (!data.more) break;
+    }
+    if (!charges.length) return null;
+
+    let recipes = [];
+    let names = {};
+    try { recipes = (await getJson("/rest/recipes")).r || []; } catch (e) {}
+    try { names = (await getJson("/rest/profile_summary")).s0 || {}; } catch (e) {}
+
+    const FAULT = 8, PROBE = 4, LEARN = 2, ADAPTIVE = 1, SERIES = 32;
+    const rows = charges.map(h => ({
+        n: h[0], profile: names[h[1]] || "#" + h[1], recipe: h[10] >= 0 && recipes[h[10]] ? recipes[h[10]][0] : null,
+        target: h[2], result: h[3], error: h[3] === null ? null : Number((h[3] - h[2]).toFixed(3)),
+        tolerance: h[9], time_s: h[5], topups: h[6], controller: (h[7] & ADAPTIVE) ? "AI" : "PID",
+        type: (h[7] & FAULT) || h[3] === null ? "aborted" : (h[7] & PROBE) ? "probe" : (h[7] & LEARN) ? "learning" :
+              (h[7] & SERIES) ? "series" : "charge",
+        minutes_since_start: Math.round(h[11] / 6) / 10,
+    }));
+
+    const groups = {};
+    for (const r of rows) {
+        const key = r.recipe || `${r.target} gr / ${r.profile}`;
+        (groups[key] = groups[key] || []).push(r);
+    }
+    const stats = {};
+    for (const [key, list] of Object.entries(groups)) {
+        const ok = list.filter(r => r.type !== "aborted");
+        if (!ok.length) { stats[key] = {charges: list.length, aborted: list.length}; continue; }
+        const finals = ok.map(r => r.result);
+        const mean = finals.reduce((a, b) => a + b, 0) / ok.length;
+        const sd = ok.length > 1 ? Math.sqrt(finals.reduce((a, b) => a + (b - mean) ** 2, 0) / (ok.length - 1)) : 0;
+        const inTol = ok.filter(r => Math.abs(r.error) <= r.tolerance + 0.0005).length;
+        stats[key] = {
+            charges: list.length, aborted: list.length - ok.length, mean_gr: Number(mean.toFixed(4)), sd_gr: Number(sd.toFixed(4)),
+            es_gr: Number((Math.max(...finals) - Math.min(...finals)).toFixed(3)), in_tolerance_pct: Math.round(100 * inTol / ok.length),
+            over: ok.filter(r => r.error > r.tolerance + 0.0005).length, under: ok.filter(r => r.error < -r.tolerance - 0.0005).length,
+            mean_time_s: Number((ok.reduce((a, r) => a + r.time_s, 0) / ok.length).toFixed(1)),
+            mean_topups: Number((ok.reduce((a, r) => a + r.topups, 0) / ok.length).toFixed(2)),
+        };
+    }
+    return {per_load: stats, charges: rows.slice(-150)};
+}
+
+async function askSession() {
+    let session = null;
+    try {
+        session = await sessionStatistics();
+    } catch (e) {
+        console.warn(e);
+    }
+    if (!session) {
+        toast(t("noSession"), "error");
+        return;
+    }
+    askClaude(t("promptSession"), "<session_statistics>\n" + JSON.stringify(session) + "\n</session_statistics>");
+}
+
 // ---------------------------------------------------------------------------
 // Start
 // ---------------------------------------------------------------------------
@@ -1759,6 +1848,12 @@ async function copyModel() {
     try {
         tab = localStorage.getItem("aiTab") || "overview";
     } catch (e) {}
+    // /ai#evaluate (Trickler page, Session - Evaluate): straight to the assistant
+    const evaluate = window.location.hash === "#evaluate";
+    if (evaluate) {
+        tab = "assistant";
+        history.replaceState(null, "", "/ai");
+    }
     showTab(document.getElementById("tab-" + tab) ? tab : "overview");
     document.getElementById("modelSelect").value = selectedModel();
     if (apiKey()) document.getElementById("apiKeyInput").placeholder = "••••••••";
@@ -1768,6 +1863,14 @@ async function copyModel() {
         await refreshDeviceSettings();
     } catch (e) {
         console.warn(e);
+    }
+    if (evaluate) {
+        if (apiKey()) {
+            askSession();
+        } else {
+            toast(t("noKey"), "error");
+            document.getElementById("claudeSetup").open = true;
+        }
     }
     poll();
 })();

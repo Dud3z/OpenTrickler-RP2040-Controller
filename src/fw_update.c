@@ -10,7 +10,17 @@
 #include "charge_mode.h"
 #include "common.h"
 #include "sha256.h"
+#include "system_monitor.h"
 #include "version.h"
+
+#if FW_DOWNLOAD
+#include "lwip/apps/http_client.h"
+#include "lwip/altcp_tls.h"
+#include "lwip/netif.h"
+#include "mbedtls/ssl.h"
+#include "pico/cyw43_arch.h"
+#include "fw_ca_bundle.h"
+#endif
 
 #if PICO_RP2350
 #include "boot/picobin.h"
@@ -25,6 +35,10 @@
 #else
 #define FW_UPDATE_SUPPORTED 0
 #define FLASH_SECTOR_SIZE 4096
+#endif
+
+#ifndef FW_DOWNLOAD
+#define FW_DOWNLOAD 0
 #endif
 
 #ifndef APP_BUILD_NUMBER
@@ -238,127 +252,94 @@ static bool query_value(const char * uri, const char * key, char * buf, size_t l
 }
 
 
-// lwIP httpd POST callbacks ------------------------------------------------
+// Writing an image (web upload and download) ------------------------------
 
-err_t httpd_post_begin(void *connection, const char *uri, const char *http_request,
-                       u16_t http_request_len, int content_len, char *response_uri,
-                       u16_t response_uri_len, u8_t *post_auto_wnd) {
-    strncpy(response_uri, FW_RESPONSE_URI, response_uri_len);
-
-    if (strncmp(uri, FW_UPLOAD_URI, strlen(FW_UPLOAD_URI)) != 0) {
-        return ERR_VAL;
-    }
-
+// Checks and preparation for an image of the given size and SHA-256 (hex)
+static bool fw_begin(uint32_t size, const char * sha) {
     if (!FW_UPDATE_SUPPORTED) {
         fw_fail("Not supported on this board");
-        return ERR_VAL;
-    }
-    if (fw_state == FW_STATE_RECEIVING || fw_state == FW_STATE_REBOOTING) {
-        // Do not touch the state of the running upload
-        return ERR_VAL;
+        return false;
     }
     if (charge_mode_config.charge_mode_state != CHARGE_MODE_EXIT) {
         fw_fail("Leave charge mode first");
-        return ERR_VAL;
+        return false;
     }
-
-    char size_buf[16];
-    if (!query_value(uri, "size", size_buf, sizeof(size_buf)) ||
-        !query_value(uri, "sha", fw_expected_sha, sizeof(fw_expected_sha)) ||
-        strlen(fw_expected_sha) != 64) {
+    if (strlen(sha) != 64) {
         fw_fail("Missing size or sha");
-        return ERR_VAL;
+        return false;
     }
-    fw_expected_size = strtoul(size_buf, NULL, 10);
+    strncpy(fw_expected_sha, sha, sizeof(fw_expected_sha) - 1);
+    fw_expected_sha[sizeof(fw_expected_sha) - 1] = '\0';
     for (char * c = fw_expected_sha; *c; c += 1) {
         if (*c >= 'A' && *c <= 'F') {
             *c = (char) (*c - 'A' + 'a');
         }
     }
-
-    if (content_len <= 0 || (uint32_t) content_len != fw_expected_size) {
+    fw_expected_size = size;
+    if (size == 0) {
         fw_fail("Size mismatch");
-        return ERR_VAL;
+        return false;
     }
     if (!find_target_partition(&target_offset, &target_size)) {
         fw_fail("No A/B partition table, install it once via USB");
-        return ERR_VAL;
+        return false;
     }
     if (fw_expected_size > target_size) {
         fw_fail("Image larger than the partition");
-        return ERR_VAL;
+        return false;
     }
 
     fw_state = FW_STATE_RECEIVING;
     fw_error = "";
-    fw_connection = connection;
     fw_received = 0;
     fw_written = 0;
     sector_fill = 0;
     fw_actual_sha[0] = '\0';
     sha256_init(&fw_sha);
-    *post_auto_wnd = 1;
 
-    printf("Firmware upload: %lu bytes to flash offset 0x%08lx\n", (unsigned long) fw_expected_size, (unsigned long) target_offset);
-    return ERR_OK;
+    printf("Firmware: %lu bytes to flash offset 0x%08lx\n", (unsigned long) fw_expected_size, (unsigned long) target_offset);
+    return true;
 }
 
 
-err_t httpd_post_receive_data(void *connection, struct pbuf *p) {
-    err_t result = ERR_OK;
-
-    if (connection != fw_connection || fw_state != FW_STATE_RECEIVING) {
-        pbuf_free(p);
-        return ERR_VAL;
+static bool fw_feed(const uint8_t * data, uint32_t len) {
+    if (fw_state != FW_STATE_RECEIVING) {
+        return false;
     }
+    if (fw_received + len > fw_expected_size) {
+        fw_fail("More data than announced");
+        return false;
+    }
+    sha256_update(&fw_sha, data, len);
+    fw_received += len;
 
-    for (struct pbuf * q = p; q != NULL; q = q->next) {
-        const uint8_t * data = (const uint8_t *) q->payload;
-        uint32_t len = q->len;
-
-        if (fw_received + len > fw_expected_size) {
-            fw_fail("More data than announced");
-            result = ERR_VAL;
-            break;
+    while (len > 0) {
+        uint32_t take = FLASH_SECTOR_SIZE - sector_fill;
+        if (take > len) {
+            take = len;
         }
-        sha256_update(&fw_sha, data, len);
-        fw_received += len;
+        memcpy(&sector_buffer[sector_fill], data, take);
+        sector_fill += take;
+        data += take;
+        len -= take;
 
-        while (len > 0) {
-            uint32_t take = FLASH_SECTOR_SIZE - sector_fill;
-            if (take > len) {
-                take = len;
+        if (sector_fill == FLASH_SECTOR_SIZE) {
+            if (!write_sector(target_offset + fw_written, sector_buffer)) {
+                fw_fail("Flash write failed");
+                return false;
             }
-            memcpy(&sector_buffer[sector_fill], data, take);
-            sector_fill += take;
-            data += take;
-            len -= take;
-
-            if (sector_fill == FLASH_SECTOR_SIZE) {
-                if (!write_sector(target_offset + fw_written, sector_buffer)) {
-                    fw_fail("Flash write failed");
-                    pbuf_free(p);
-                    return ERR_VAL;
-                }
-                fw_written += FLASH_SECTOR_SIZE;
-                sector_fill = 0;
-            }
+            fw_written += FLASH_SECTOR_SIZE;
+            sector_fill = 0;
         }
     }
-
-    pbuf_free(p);
-    return result;
+    return true;
 }
 
 
-void httpd_post_finished(void *connection, char *response_uri, u16_t response_uri_len) {
-    strncpy(response_uri, FW_RESPONSE_URI, response_uri_len);
-
-    if (connection != fw_connection || fw_state != FW_STATE_RECEIVING) {
+static void fw_end(void) {
+    if (fw_state != FW_STATE_RECEIVING) {
         return;
     }
-    fw_connection = NULL;
-
     if (fw_received != fw_expected_size) {
         fw_fail("Upload incomplete");
         return;
@@ -378,7 +359,428 @@ void httpd_post_finished(void *connection, char *response_uri, u16_t response_ur
     }
 
     fw_state = FW_STATE_VERIFIED;
-    printf("Firmware upload verified\n");
+    printf("Firmware verified\n");
+}
+
+
+// lwIP httpd POST callbacks ------------------------------------------------
+
+err_t httpd_post_begin(void *connection, const char *uri, const char *http_request,
+                       u16_t http_request_len, int content_len, char *response_uri,
+                       u16_t response_uri_len, u8_t *post_auto_wnd) {
+    strncpy(response_uri, FW_RESPONSE_URI, response_uri_len);
+
+    if (strncmp(uri, FW_UPLOAD_URI, strlen(FW_UPLOAD_URI)) != 0) {
+        return ERR_VAL;
+    }
+
+    if (fw_state == FW_STATE_RECEIVING || fw_state == FW_STATE_REBOOTING) {
+        // Do not touch the state of the running upload or download
+        return ERR_VAL;
+    }
+
+    char size_buf[16];
+    char sha_buf[72];
+    if (!query_value(uri, "size", size_buf, sizeof(size_buf)) || !query_value(uri, "sha", sha_buf, sizeof(sha_buf))) {
+        fw_fail("Missing size or sha");
+        return ERR_VAL;
+    }
+    uint32_t size = strtoul(size_buf, NULL, 10);
+    if (content_len <= 0 || (uint32_t) content_len != size) {
+        fw_fail("Size mismatch");
+        return ERR_VAL;
+    }
+    if (!fw_begin(size, sha_buf)) {
+        return ERR_VAL;
+    }
+    fw_connection = connection;
+    *post_auto_wnd = 1;
+    return ERR_OK;
+}
+
+
+err_t httpd_post_receive_data(void *connection, struct pbuf *p) {
+    err_t result = ERR_OK;
+
+    if (connection != fw_connection || fw_state != FW_STATE_RECEIVING) {
+        pbuf_free(p);
+        return ERR_VAL;
+    }
+
+    for (struct pbuf * q = p; q != NULL; q = q->next) {
+        if (!fw_feed((const uint8_t *) q->payload, q->len)) {
+            fw_connection = NULL;
+            result = ERR_VAL;
+            break;
+        }
+    }
+
+    pbuf_free(p);
+    return result;
+}
+
+
+void httpd_post_finished(void *connection, char *response_uri, u16_t response_uri_len) {
+    strncpy(response_uri, FW_RESPONSE_URI, response_uri_len);
+
+    if (connection != fw_connection || fw_state != FW_STATE_RECEIVING) {
+        return;
+    }
+    fw_connection = NULL;
+    fw_end();
+}
+
+
+// Download from GitHub by the trickler itself (Pico 2 W) -------------------
+//
+// raw.githubusercontent.com/<repo>/firmware/manifest.json tells the newest
+// build with the size and SHA-256 of pico2_w.bin. The image is streamed into
+// the update partition exactly like a web upload and checked the same way.
+// TLS: the server certificate has to chain to one of the roots in
+// fw_ca_bundle.h, otherwise nothing is downloaded.
+
+#ifndef FW_UPDATE_REPO
+#define FW_UPDATE_REPO      "Dud3z/OpenTrickler-RP2040-Controller"
+#endif
+#define FW_HOST             "raw.githubusercontent.com"
+#define FW_IMAGE_NAME       "pico2_w.bin"
+#define FW_MANIFEST_MAX     6144
+
+static volatile fw_download_state_t dl_state = FW_DOWNLOAD_IDLE;
+static const char * dl_error = "";
+static int dl_remote_build = -1;
+static uint32_t dl_remote_size = 0;
+
+#if FW_DOWNLOAD
+
+static char dl_remote_sha[65];
+
+typedef enum {
+    DL_JOB_MANIFEST,
+    DL_JOB_IMAGE,
+} dl_job_t;
+
+static dl_job_t dl_job;
+static uint32_t dl_generation = 0;      // Callbacks of an abandoned request are ignored
+static char dl_manifest[FW_MANIFEST_MAX + 1];
+static uint32_t dl_manifest_len = 0;
+static bool dl_bad = false;             // Data of this request is ignored (wrong status, write failed)
+static struct altcp_tls_config * dl_tls_config = NULL;
+static struct altcp_tls_config * dl_tls_config_old = NULL;
+static httpc_connection_t dl_settings;
+static altcp_allocator_t dl_allocator;
+static char dl_uri[160];
+
+
+static void dl_fail(const char * reason) {
+    dl_error = reason;
+    dl_state = FW_DOWNLOAD_ERROR;
+    printf("Firmware download failed: %s\n", reason);
+}
+
+
+// TLS connection with the server name set (SNI and the name check of the certificate)
+static struct altcp_pcb * dl_tls_alloc(void * arg, u8_t ip_type) {
+    struct altcp_pcb * pcb = altcp_tls_alloc((struct altcp_tls_config *) arg, ip_type);
+    if (pcb != NULL) {
+        mbedtls_ssl_set_hostname((mbedtls_ssl_context *) altcp_tls_context(pcb), FW_HOST);
+    }
+    return pcb;
+}
+
+
+// Value after "key": in the manifest (after start), as text
+static const char * json_find(const char * text, const char * key) {
+    char pattern[40];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    const char * at = strstr(text, pattern);
+    if (at == NULL) {
+        return NULL;
+    }
+    at = strchr(at + strlen(pattern), ':');
+    if (at == NULL) {
+        return NULL;
+    }
+    at += 1;
+    while (*at == ' ' || *at == '\t' || *at == '\n' || *at == '\r') {
+        at += 1;
+    }
+    return at;
+}
+
+
+static bool dl_parse_manifest(void) {
+    dl_manifest[dl_manifest_len] = '\0';
+    const char * build = json_find(dl_manifest, "build");
+    const char * image = strstr(dl_manifest, "\"" FW_IMAGE_NAME "\"");
+    if (build == NULL || image == NULL) {
+        return false;
+    }
+    const char * size = json_find(image, "size");
+    const char * sha = json_find(image, "sha256");
+    if (size == NULL || sha == NULL || *sha != '"') {
+        return false;
+    }
+    sha += 1;
+    if (strspn(sha, "0123456789abcdefABCDEF") != 64 || sha[64] != '"') {
+        return false;
+    }
+    dl_remote_build = (int) strtol(build, NULL, 10);
+    dl_remote_size = strtoul(size, NULL, 10);
+    memcpy(dl_remote_sha, sha, 64);
+    dl_remote_sha[64] = '\0';
+    return dl_remote_build > 0 && dl_remote_size > 0;
+}
+
+
+static err_t dl_headers(httpc_state_t * connection, void * arg, struct pbuf * hdr, u16_t hdr_len, u32_t content_len) {
+    (void) connection;
+    (void) hdr_len;
+    if ((uint32_t) (uintptr_t) arg != dl_generation) {
+        return ERR_OK;
+    }
+    // Status line: "HTTP/1.1 200 OK"
+    char line[16];
+    u16_t n = pbuf_copy_partial(hdr, line, sizeof(line) - 1, 0);
+    line[n] = '\0';
+    char * space = strchr(line, ' ');
+    // A failure closes the connection (the result callback follows)
+    if (space == NULL || strncmp(space + 1, "200", 3) != 0) {
+        dl_bad = true;
+        dl_fail(dl_job == DL_JOB_MANIFEST ? "No firmware published (manifest missing)" : "Image not found on the server");
+        return ERR_VAL;
+    }
+    if (dl_job == DL_JOB_IMAGE) {
+        if (content_len != dl_remote_size) {
+            dl_bad = true;
+            dl_fail("Image size does not match the manifest");
+            return ERR_VAL;
+        }
+        if (!fw_begin(dl_remote_size, dl_remote_sha)) {
+            dl_bad = true;
+            dl_fail(fw_error);
+            return ERR_VAL;
+        }
+    }
+    return ERR_OK;
+}
+
+
+static err_t dl_recv(void * arg, struct altcp_pcb * conn, struct pbuf * p, err_t err) {
+    (void) err;
+    if (p == NULL) {
+        return ERR_OK;
+    }
+    bool current = (uint32_t) (uintptr_t) arg == dl_generation;
+    if (current && !dl_bad) {
+        for (struct pbuf * q = p; q != NULL; q = q->next) {
+            if (dl_job == DL_JOB_MANIFEST) {
+                uint32_t take = q->len;
+                if (dl_manifest_len + take > FW_MANIFEST_MAX) {
+                    dl_bad = true;
+                    dl_fail("Manifest too large");
+                    break;
+                }
+                memcpy(&dl_manifest[dl_manifest_len], q->payload, take);
+                dl_manifest_len += take;
+            }
+            else if (!fw_feed((const uint8_t *) q->payload, q->len)) {
+                dl_bad = true;
+                dl_fail(fw_error);
+                break;
+            }
+        }
+    }
+    altcp_recved(conn, p->tot_len);
+    pbuf_free(p);
+    return ERR_OK;
+}
+
+
+static void dl_result(void * arg, httpc_result_t result, u32_t rx_content_len, u32_t srv_res, err_t err) {
+    (void) rx_content_len;
+    (void) srv_res;
+    (void) err;
+    if ((uint32_t) (uintptr_t) arg != dl_generation) {
+        return;
+    }
+    if (dl_bad) {
+        // Reported already; a started image write is discarded
+        if (fw_state == FW_STATE_RECEIVING) {
+            fw_fail(dl_error);
+        }
+        return;
+    }
+    if (result != HTTPC_RESULT_OK) {
+        if (fw_state == FW_STATE_RECEIVING) {
+            fw_fail("Download interrupted");
+        }
+        dl_fail(result == HTTPC_RESULT_ERR_HOSTNAME ? "No internet (DNS failed)" :
+                result == HTTPC_RESULT_ERR_CONNECT ? "Connection or certificate check failed" :
+                result == HTTPC_RESULT_ERR_TIMEOUT ? "Timeout" : "Download interrupted");
+        return;
+    }
+
+    if (dl_job == DL_JOB_MANIFEST) {
+        if (!dl_parse_manifest()) {
+            dl_fail("Manifest not readable");
+            return;
+        }
+        dl_state = FW_DOWNLOAD_CHECKED;
+        printf("Firmware on GitHub: build %d (running %d)\n", dl_remote_build, APP_BUILD_NUMBER);
+    }
+    else {
+        fw_end();
+        if (fw_state == FW_STATE_VERIFIED) {
+            dl_state = FW_DOWNLOAD_DONE;
+        }
+        else {
+            dl_fail(fw_error);
+        }
+    }
+}
+
+
+static bool dl_start(dl_job_t job, const char * file) {
+    if (dl_state == FW_DOWNLOAD_CHECKING || dl_state == FW_DOWNLOAD_DOWNLOADING) {
+        return false;
+    }
+    cyw43_arch_lwip_begin();
+
+    if (netif_default == NULL || !netif_is_link_up(netif_default) || ip4_addr_isany_val(*netif_ip4_addr(netif_default))) {
+        cyw43_arch_lwip_end();
+        dl_fail("WiFi not connected");
+        return false;
+    }
+
+    // The config of the last request is freed now, its connection is gone
+    if (dl_tls_config_old != NULL) {
+        altcp_tls_free_config(dl_tls_config_old);
+        dl_tls_config_old = NULL;
+    }
+    if (dl_tls_config == NULL) {
+        dl_tls_config = altcp_tls_create_config_client((const u8_t *) fw_ca_bundle, sizeof(fw_ca_bundle));
+    }
+    if (dl_tls_config == NULL) {
+        cyw43_arch_lwip_end();
+        dl_fail("TLS setup failed (memory)");
+        return false;
+    }
+
+    dl_generation += 1;
+    dl_job = job;
+    dl_bad = false;
+    dl_manifest_len = 0;
+    dl_error = "";
+
+    memset(&dl_settings, 0x0, sizeof(dl_settings));
+    dl_allocator.alloc = dl_tls_alloc;
+    dl_allocator.arg = dl_tls_config;
+    dl_settings.altcp_allocator = &dl_allocator;
+    dl_settings.headers_done_fn = dl_headers;
+    dl_settings.result_fn = dl_result;
+
+    snprintf(dl_uri, sizeof(dl_uri), "/%s/firmware/%s", FW_UPDATE_REPO, file);
+    dl_state = job == DL_JOB_MANIFEST ? FW_DOWNLOAD_CHECKING : FW_DOWNLOAD_DOWNLOADING;
+
+    httpc_state_t * connection = NULL;
+    err_t err = httpc_get_file_dns(FW_HOST, 443, dl_uri, &dl_settings, dl_recv,
+                                   (void *) (uintptr_t) dl_generation, &connection);
+    cyw43_arch_lwip_end();
+
+    if (err != ERR_OK) {
+        dl_fail("Could not start the download");
+        return false;
+    }
+    return true;
+}
+
+#endif  // FW_DOWNLOAD
+
+
+bool fw_download_supported(void) {
+    return FW_DOWNLOAD && FW_UPDATE_SUPPORTED;
+}
+
+
+bool fw_download_check(void) {
+#if FW_DOWNLOAD
+    return dl_start(DL_JOB_MANIFEST, "manifest.json");
+#else
+    dl_error = "Updates over WiFi need the Pico 2 W";
+    dl_state = FW_DOWNLOAD_ERROR;
+    return false;
+#endif
+}
+
+
+bool fw_download_install(void) {
+#if FW_DOWNLOAD
+    if (dl_state != FW_DOWNLOAD_CHECKED || dl_remote_build <= 0) {
+        return false;
+    }
+    if (fw_state == FW_STATE_RECEIVING || fw_state == FW_STATE_REBOOTING) {
+        return false;
+    }
+    return dl_start(DL_JOB_IMAGE, FW_IMAGE_NAME);
+#else
+    return false;
+#endif
+}
+
+
+// A request that hangs (no answer at all) is given up: its callbacks are ignored
+void fw_download_abandon(const char * reason) {
+#if FW_DOWNLOAD
+    dl_generation += 1;
+    if (dl_tls_config != NULL && dl_tls_config_old == NULL) {
+        // Freed with the next request, the stale connection may still use it
+        dl_tls_config_old = dl_tls_config;
+        dl_tls_config = NULL;
+    }
+#endif
+    if (fw_state == FW_STATE_RECEIVING && fw_connection == NULL) {
+        fw_fail(reason);
+    }
+    dl_error = reason;
+    dl_state = FW_DOWNLOAD_ERROR;
+}
+
+
+void fw_download_status(fw_download_status_t * status) {
+    status->state = dl_state;
+    status->error = dl_error;
+    status->remote_build = dl_remote_build;
+    status->running_build = APP_BUILD_NUMBER;
+    status->received = fw_received;
+    status->size = dl_state == FW_DOWNLOAD_DOWNLOADING ? dl_remote_size : fw_expected_size;
+    status->verified = fw_state == FW_STATE_VERIFIED;
+}
+
+
+bool fw_update_available(void) {
+    return dl_remote_build > APP_BUILD_NUMBER;
+}
+
+
+// Restart into the verified image (the bootrom tries it, the new firmware confirms itself)
+bool fw_update_apply(void) {
+#if FW_UPDATE_SUPPORTED
+    if (fw_state != FW_STATE_VERIFIED) {
+        return false;
+    }
+    if (charge_mode_config.charge_mode_state != CHARGE_MODE_EXIT) {
+        fw_fail("Leave charge mode first");
+        return false;
+    }
+    fw_state = FW_STATE_REBOOTING;
+    // The delay lets a REST response go out
+    system_monitor_planned_reboot();
+    rom_reboot(REBOOT2_FLAG_REBOOT_TYPE_FLASH_UPDATE, FW_REBOOT_DELAY_MS, XIP_BASE + target_offset, 0);
+    return true;
+#else
+    return false;
+#endif
 }
 
 
@@ -411,7 +813,8 @@ bool http_rest_fw_info(struct fs_file *file, int num_params, char *params[], cha
     // max (int): maximum image size
     // st (str), err (str), rx (int), size (int), sha (str): upload state
     // conf (bool): this boot was an update that has been confirmed
-    static char buf[512];
+    // rb (int): newest build the trickler found on GitHub itself, -1 unknown
+    static char buf[576];
 
     int part = -1;
     bool ab = false;
@@ -432,7 +835,7 @@ bool http_rest_fw_info(struct fs_file *file, int num_params, char *params[], cha
     snprintf(buf, sizeof(buf),
              "%s"
              "{\"board\":\"%s\",\"ver\":\"%s\",\"vcs\":\"%s\",\"build\":%d,\"sup\":%s,\"part\":%d,\"ab\":%s,"
-             "\"max\":%lu,\"st\":\"%s\",\"err\":\"%s\",\"rx\":%lu,\"size\":%lu,\"sha\":\"%s\",\"conf\":%s}",
+             "\"max\":%lu,\"st\":\"%s\",\"err\":\"%s\",\"rx\":%lu,\"size\":%lu,\"sha\":\"%s\",\"conf\":%s,\"rb\":%d}",
              http_json_header,
              BOARD_NAME,
              version_string,
@@ -447,7 +850,8 @@ bool http_rest_fw_info(struct fs_file *file, int num_params, char *params[], cha
              (unsigned long) fw_received,
              (unsigned long) fw_expected_size,
              fw_actual_sha,
-             boolean_to_string(fw_boot_confirmed));
+             boolean_to_string(fw_boot_confirmed),
+             dl_remote_build);
 
     size_t len = strlen(buf);
     file->data = buf;
@@ -480,20 +884,9 @@ bool http_rest_fw_apply(struct fs_file *file, int num_params, char *params[], ch
         fw_error = "";
     }
 
-#if FW_UPDATE_SUPPORTED
-    if (go && fw_state == FW_STATE_VERIFIED) {
-        if (charge_mode_config.charge_mode_state != CHARGE_MODE_EXIT) {
-            fw_fail("Leave charge mode first");
-        }
-        else {
-            fw_state = FW_STATE_REBOOTING;
-            // The bootrom tries the new partition first; the delay lets this response go out
-            rom_reboot(REBOOT2_FLAG_REBOOT_TYPE_FLASH_UPDATE, FW_REBOOT_DELAY_MS, XIP_BASE + target_offset, 0);
-        }
+    if (go) {
+        fw_update_apply();
     }
-#else
-    (void) go;
-#endif
 
     return http_rest_fw_info(file, num_params, params, values);
 }

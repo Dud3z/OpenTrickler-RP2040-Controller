@@ -10,6 +10,7 @@
 #include "hardware/regs/addressmap.h"
 
 #include "eeprom.h"
+#include "settings_state.h"
 #include "scale.h"
 #include "motors.h"
 #include "charge_mode.h"
@@ -69,6 +70,7 @@ uint8_t eeprom_save_all() {
         // Run the save handler
         node->function_handler();
     }
+    settings_state_all_saved();
     return 37;  // Configuration Menu ID
 }
 

@@ -6,11 +6,13 @@
 #include "common.h"
 #include "eeprom.h"
 #include "version.h"
+#include "system_monitor.h"
 
 extern eeprom_metadata_t metadata;
 
 
 int software_reboot() {
+    system_monitor_planned_reboot();
     watchdog_reboot(0, 0, 0);
 
     return 0;

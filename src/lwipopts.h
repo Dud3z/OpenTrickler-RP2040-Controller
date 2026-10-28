@@ -46,4 +46,20 @@
 #define MEMP_NUM_SYS_TIMEOUT (LWIP_NUM_SYS_TIMEOUT_INTERNAL + 8)
 #define MEMP_NUM_TCP_PCB 12
 
+// Firmware download from GitHub by the trickler itself (Pico 2 W, display
+// menu): HTTPS client with mbedtls (FW_DOWNLOAD is set in CMakeLists.txt)
+#if FW_DOWNLOAD
+#define LWIP_ALTCP                      1
+#define LWIP_ALTCP_TLS                  1
+#define LWIP_ALTCP_TLS_MBEDTLS          1
+#define ALTCP_MBEDTLS_AUTHMODE          MBEDTLS_SSL_VERIFY_REQUIRED
+#define LWIP_HTTPC_HAVE_FILE_IO         0
+#define LWIP_DNS                        1
+// After the handshake the TLS layer opens the TCP window only when a whole
+// record (up to 16 kB) is decrypted: the window must hold a full record, or
+// the download stalls. The pbuf pool (24 x 1.5 kB) can buffer it.
+#undef TCP_WND
+#define TCP_WND                         (16 * TCP_MSS)
+#endif
+
 #endif

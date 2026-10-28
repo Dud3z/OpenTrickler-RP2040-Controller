@@ -36,6 +36,8 @@ static uint8_t menu_get_parent_form_id(uint8_t form_id) {
     // Root is form 1.
     switch (form_id) {
         case 10: return 1;
+        case 14: return 1;
+        case 15: return 14;
         case 11: return 10;
         case 12: return 10;
         case 13: return 10;
@@ -52,6 +54,7 @@ static uint8_t menu_get_parent_form_id(uint8_t form_id) {
         case 36: return 30;
         case 37: return 30;
         case 39: return 30;
+        case 42: return 30;
 
         case 40: return 1;
         case 41: return 40;
@@ -156,6 +159,9 @@ void menu_task(void *p){
                     break;
                 case APP_STATE_ENTER_AI_RESET_MODEL:
                     exit_form_id = ai_trickle_menu_reset_model();
+                    break;
+                case APP_STATE_ENTER_FW_UPDATE:
+                    exit_form_id = fw_update_display_menu();
                     break;
                 default:
                     break;

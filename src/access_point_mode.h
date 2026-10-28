@@ -1,7 +1,11 @@
 #ifndef ACCESS_POINT_MODE_H_
 #define ACCESS_POINT_MODE_H_
 
+// Password of the hotspot (the SSID is the host name, opentrickler-<id>)
+#define AP_MODE_PASSWORD "opentrickler"
+
 #include <stdint.h>
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {

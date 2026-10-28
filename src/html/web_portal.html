@@ -9,13 +9,23 @@
     <link href="/styles.css" rel="stylesheet" type="text/css" />
 
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <link rel="icon" href="https://raw.githubusercontent.com/eamars/OpenTrickler/main/Resources/favicon.ico">
+    <link rel="icon" href="/favicon.ico">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 
     <!-- Saved to the home screen it runs like an app -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="OpenTrickler">
+
+    <script>
+        // Light / dark design (Settings top right): "auto" follows the device
+        (function () {
+            let theme = "auto";
+            try { theme = localStorage.getItem("ot_theme") || "auto"; } catch (e) {}
+            if (theme !== "auto") document.documentElement.setAttribute("data-theme", theme);
+        })();
+    </script>
 
     <style>
         /* viewport-fit=cover lets the page run under the notch and status
@@ -120,8 +130,9 @@
                         <tbody id="sessionGroups"></tbody>
                     </table>
                 </div>
-                <div class="grid grid-cols-2 gap-2">
+                <div class="grid grid-cols-3 gap-2">
                     <button class="btn btn-neutral" onclick="downloadSessionCsv()">Export CSV</button>
+                    <button class="btn btn-neutral" onclick="window.location.href = '/ai#evaluate'" title="The assistant on the AI page looks at the session">Evaluate</button>
                     <button class="btn btn-neutral" onclick="startNewSession()">New Session</button>
                 </div>
             </div>
@@ -179,6 +190,17 @@
                         </label>
                     </div> 
                     <div id="settingsSectionTitle" class="w-full px-2 mx-2">---</div>
+                    <div class="flex-none">
+                        <button class="btn btn-square btn-ghost" onclick="cycleTheme()" title="Light / dark / automatic" aria-label="Light or dark design">
+                            <span id="themeIcon" class="text-lg">◐</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Applied but not saved to the EEPROM: lost on the next restart -->
+                <div id="unsavedBanner" role="alert" class="alert alert-warning text-sm mx-6 my-2" style="display: none;">
+                    <span id="unsavedText"></span>
+                    <button class="btn btn-sm" onclick="saveAllSettings()">Save now</button>
                 </div>
 
                 <div class="grid grid-cols-1 px-6 gap-2">
@@ -298,6 +320,33 @@
                                 <span class="label-text">Tap Angle of the Fine Trickler (degrees)</span>
                                 <input type="number" class="input input-bordered" name="a7" step="1" min="1" max="180">
                                 <span id="aiTapInfo" class="text-sm opacity-80"></span>
+                            </div>
+                        </form>
+
+                        <form id="chargeSafetyForm" action="/rest/feature_config" class="grid grid-cols-1 gap-3">
+                            <div class="divider">Safety</div>
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Stop When the Pan Is Lifted</span>
+                                <select class="select select-bordered" name="f0">
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                                <span class="text-sm opacity-80">The motors stop at once when the reading falls below zero during a charge. The charge is aborted, empty the pan and put it back.</span>
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Pause When the Table Is Bumped</span>
+                                <select class="select select-bordered" name="f1">
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                                <span class="text-sm opacity-80">When the reading drops during a charge (powder cannot do that), the motors pause until the scale is stable and the charge carries on from there. While the coarse trickler runs only big drops count.</span>
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Drop That Counts as a Bump (gr)</span>
+                                <input type="number" class="input input-bordered" name="f2" step="0.05" min="0.1" max="2.5">
+                                <span class="text-sm opacity-80">Lower is more sensitive. Raise it if charges pause without a reason.</span>
                             </div>
                         </form>
                         <button class="btn btn-neutral page-apply-btn">Apply</button>
@@ -661,6 +710,23 @@
                                 </select>
                             </div>
                         </form>
+                        <div class="divider">Both Motors</div>
+                        <form id="motorFeatureForm" action="/rest/feature_config" class="grid grid-cols-1 gap-3">
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Reduced Standstill Current</span>
+                                <select class="select select-bordered" name="f3">
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                                <span class="text-sm opacity-80">The drivers lower the current about 0.4 s after a motor stopped and raise it with the first step again. Motors and drivers stay cooler while the trickler waits.</span>
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Standstill Current (% of the motor current)</span>
+                                <input type="number" class="input input-bordered" name="f4" step="5" min="10" max="100">
+                                <span class="text-sm opacity-80">Off uses 50 %, the driver default. Below about 25 % the first steps may lose torque, raise it if a tube does not start reliably.</span>
+                            </div>
+                        </form>
                         <button class="btn btn-neutral page-apply-btn">Apply</button>
                     </section>
                     <section class="settings-page" id="settings-servo-gate" name="Servo Gate" style="display: none;">
@@ -808,6 +874,37 @@
                                 <input type="color" class="input w-full" name="c4">
                             </div>
                         </form>
+                        <div class="divider">Dimming</div>
+                        <form id="displayFeatureForm" action="/rest/feature_config" class="grid grid-cols-1 gap-3">
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Dim After a While Without Use</span>
+                                <select class="select select-bordered" name="f5">
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                                <span class="text-sm opacity-80">Backlight and LEDs go down when nothing happens; a turn or press of the knob, a charge, the web page or something put on the scale wakes them up. Never while charging.</span>
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Dim After (seconds)</span>
+                                <input type="number" class="input input-bordered" name="f6" step="10" min="10" max="3600">
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Brightness While Dimmed (%)</span>
+                                <input type="number" class="input input-bordered" name="f7" step="5" min="0" max="100">
+                            </div>
+
+                            <div class="divider">Sound</div>
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Sound on the Web Page When a Charge Is Done</span>
+                                <select class="select select-bordered" name="f8">
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                                <span class="text-sm opacity-80">The Mini 12864 has no beeper connected on the OpenTrickler board, so the web page beeps: two short beeps when the charge is within the tolerance, a low tone for over and a rising tone for under. Phones need one tap on the page first.</span>
+                            </div>
+                        </form>
                         <button class="btn btn-neutral page-apply-btn">Apply</button>
                     </section>
 
@@ -915,6 +1012,25 @@
                             <button class="btn btn-neutral system-control-import-btn" onclick="onImportConfigClicked()">Import Config</button>
                         </div>
 
+                        <div class="divider">Restarts and Errors</div>
+                        <div class="grid grid-cols-1 gap-3">
+                            <div id="errorLogSummary" class="text-sm"></div>
+                            <div id="errorLogList" class="grid grid-cols-1 gap-1 text-sm"></div>
+                            <button class="btn btn-neutral" onclick="clearErrorLog()">Clear Log</button>
+                        </div>
+
+                        <form id="systemFeatureForm" action="/rest/feature_config" class="grid grid-cols-1 gap-3 mt-3">
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Watchdog</span>
+                                <select class="select select-bordered" name="f10">
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                                <span class="text-sm opacity-80">Restarts the trickler when the firmware hangs. The restart also stops the motors, which would otherwise keep turning at the last speed. Switching it off takes effect at once.</span>
+                            </div>
+                        </form>
+                        <button class="btn btn-neutral page-apply-btn mt-3">Apply</button>
+
                         <div class="divider">Statistics</div>
                         <span class="label-text text-sm opacity-80">The session statistics and the CSV export of all charges are on the Trickler page.</span>
                     </section>
@@ -939,6 +1055,18 @@
                             <button id="fwInstallButton" class="btn btn-primary hidden" onclick="fwInstallUpdate()">Install</button>
                             <button id="fwApplyButton" class="btn btn-warning hidden" onclick="fwApplyUpdate()">Restart &amp; Activate</button>
                         </div>
+
+                        <form id="firmwareFeatureForm" action="/rest/feature_config" class="grid grid-cols-1 gap-3 mt-3">
+                            <div class="grid grid-cols-1 gap-1">
+                                <span class="label-text">Look for New Firmware</span>
+                                <select class="select select-bordered" name="f9">
+                                    <option value="true">Yes</option>
+                                    <option value="false">No</option>
+                                </select>
+                                <span class="text-sm opacity-80">The web page looks for a new firmware in the background (at most once a day) and marks Settings when there is one. The display shows it under Settings - Firmware Update as well.</span>
+                            </div>
+                        </form>
+                        <button class="btn btn-neutral page-apply-btn mt-3">Apply</button>
                     </section>
 
                 </div>
@@ -961,7 +1089,7 @@
                     <li class="menu-title">System</li>
                     <li><a class="text-lg" onclick="onSettingsLinkClicked('settings-wireless')">Wireless</a></li>
                     <li><a class="text-lg" onclick="onSettingsLinkClicked('settings-system-control')">System</a></li>
-                    <li><a class="text-lg" onclick="onSettingsLinkClicked('settings-firmware')">Firmware Update</a></li>
+                    <li><a class="text-lg" onclick="onSettingsLinkClicked('settings-firmware')">Firmware Update<span id="fwMenuBadge" class="badge badge-primary badge-sm" style="display: none;">new</span></a></li>
                 </ul>
             </div>
         </div>
@@ -982,7 +1110,7 @@
         <svg class="w-5 h-5 mb-2 text-gray-500 dark:text-gray-400 group-hover:text-blue-600 dark:group-hover:text-blue-500" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 20">
             <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 12.25V1m0 11.25a2.25 2.25 0 0 0 0 4.5m0-4.5a2.25 2.25 0 0 1 0 4.5M4 19v-2.25m6-13.5V1m0 2.25a2.25 2.25 0 0 0 0 4.5m0-4.5a2.25 2.25 0 0 1 0 4.5M10 19V7.75m6 4.5V1m0 11.25a2.25 2.25 0 1 0 0 4.5 2.25 2.25 0 0 0 0-4.5ZM16 19v-2"/>
         </svg>
-        <span class="text-sm text-gray-500 dark:text-gray-400 group-hover:text-blue-600 dark:group-hover:text-blue-500">Settings</span>
+        <span class="text-sm text-gray-500 dark:text-gray-400 group-hover:text-blue-600 dark:group-hover:text-blue-500">Settings<span id="settingsUpdateBadge" class="badge badge-primary badge-xs ml-1" style="display: none;" title="New firmware available"></span></span>
     </button>
     <button id="aiNavButton" onclick="window.location.href = '/ai'">
         <svg class="w-6 h-6 text-gray-800 dark:text-white" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24">
@@ -1089,6 +1217,16 @@
     </form>
 </dialog>
 
+<dialog id="panRemovedDialog" class="modal">
+    <div class="modal-box">
+        <h3 class="font-bold text-lg">Pan removed</h3>
+        <p class="py-4">The pan was lifted during the charge. The motors stopped and the charge was aborted. Empty the pan and put it back, the trickler zeroes and goes on with the next charge.</p>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+    </form>
+</dialog>
+
 <dialog id="overThrowDialog" class="modal">
     <div class="modal-box">
         <h3 class="font-bold text-lg">Warning</h3>
@@ -1161,6 +1299,7 @@
         NO_EVENT: 1 << 0, 
         UNDER_CHARGE: 1 << 1, 
         OVER_CHARGE: 1 << 2, 
+        PAN_REMOVED: 1 << 3,
     });
 
     const ScaleAction = Object.freeze({ 
@@ -1398,13 +1537,19 @@
                 _setStartStopButtonWidget(true);
             }
 
-            // Process event
+            // Sound when the charge is done (Settings - Display & LEDs)
+            resultSoundStep(charge_mode_state, charge_mode_event);
+
+            // Process event (bits, several can come at once)
             if (charge_mode_event != ChargeModeEvent.NO_EVENT) {
                 var dialog_name = null;
-                if (charge_mode_event == ChargeModeEvent.UNDER_CHARGE) {
+                if (charge_mode_event & ChargeModeEvent.PAN_REMOVED) {
+                    dialog_name = "panRemovedDialog";
+                }
+                else if (charge_mode_event & ChargeModeEvent.UNDER_CHARGE) {
                     dialog_name = "underThrowDialog";
                 }
-                else if (charge_mode_event == ChargeModeEvent.OVER_CHARGE) {
+                else if (charge_mode_event & ChargeModeEvent.OVER_CHARGE) {
                     dialog_name = "overThrowDialog";
                 }
 
@@ -1705,6 +1850,10 @@
         if (sectionId == "settings-recipes") {
             renderRecipes();
         }
+        if (sectionId == "settings-system-control") {
+            renderErrorLog();
+        }
+        refreshUnsaved();
 
         // Populate values of every form on the page
         targetSection.querySelectorAll("form[action]").forEach(form => loadForm(form));
@@ -1768,6 +1917,11 @@
         // Other pages may depend on what changed (servo gate, AI mode, motor limits)
         await refreshDeviceOptions();
         renderAiLimits();
+        refreshUnsaved();
+        if (section.querySelector('form[action="/rest/feature_config"]')) {
+            await loadFeatureConfig();
+            backgroundUpdateCheck();
+        }
         if (section.id == "settings-profile") {
             renderProfileNames();
             renderProfileAi();
@@ -1973,6 +2127,7 @@
             "/rest/profile_config?pf=7&ro=true",
             "/rest/servo_gate_config",
             "/rest/ai_config",
+            "/rest/feature_config",
         ]
 
         // Read metadata
@@ -2151,6 +2306,248 @@
         renderProfileNames();
     }
 
+
+
+    // ---------------------------------------------------------------------
+    // Light / dark design: auto (device) -> light -> dark
+    const THEMES = ["auto", "light", "dark"];
+
+    function currentTheme() {
+        try { return localStorage.getItem("ot_theme") || "auto"; } catch (e) { return "auto"; }
+    }
+
+    function applyTheme(theme) {
+        if (theme === "auto") {
+            document.documentElement.removeAttribute("data-theme");
+        } else {
+            document.documentElement.setAttribute("data-theme", theme);
+        }
+        const icon = document.getElementById("themeIcon");
+        if (icon) {
+            icon.textContent = theme === "light" ? "☀" : (theme === "dark" ? "☾" : "◐");
+        }
+    }
+
+    function cycleTheme() {
+        const next = THEMES[(THEMES.indexOf(currentTheme()) + 1) % THEMES.length];
+        try { localStorage.setItem("ot_theme", next); } catch (e) {}
+        applyTheme(next);
+    }
+
+    // ---------------------------------------------------------------------
+    // Options of the trickler (feature_config): sound, update notice
+    let featureConfig = null;
+
+    async function loadFeatureConfig() {
+        try {
+            featureConfig = await getJson("/rest/feature_config");
+        } catch (e) {
+            featureConfig = null;
+        }
+        return featureConfig;
+    }
+
+    // ---------------------------------------------------------------------
+    // Sound when a charge is done. Browsers only play sound after the user
+    // touched the page once, the first tap or click unlocks it.
+    let audioContext = null;
+
+    function unlockAudio() {
+        if (!audioContext) {
+            try {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            } catch (e) {
+                audioContext = null;
+            }
+        }
+        if (audioContext && audioContext.state === "suspended") {
+            audioContext.resume();
+        }
+    }
+    document.addEventListener("click", unlockAudio);
+    document.addEventListener("touchstart", unlockAudio);
+
+    function playTones(tones) {
+        if (!audioContext || !featureConfig || !(featureConfig.f8 === true || featureConfig.f8 === "true")) {
+            return;
+        }
+        let t = audioContext.currentTime + 0.02;
+        for (const [freq, duration, slideTo] of tones) {
+            const osc = audioContext.createOscillator();
+            const gain = audioContext.createGain();
+            osc.type = "sine";
+            osc.frequency.setValueAtTime(freq, t);
+            if (slideTo) {
+                osc.frequency.linearRampToValueAtTime(slideTo, t + duration);
+            }
+            gain.gain.setValueAtTime(0.0001, t);
+            gain.gain.exponentialRampToValueAtTime(0.3, t + 0.01);
+            gain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+            osc.connect(gain).connect(audioContext.destination);
+            osc.start(t);
+            osc.stop(t + duration + 0.02);
+            t += duration + 0.08;
+        }
+    }
+
+    const SOUND_OK = [[1320, 0.09], [1320, 0.09]];
+    const SOUND_OVER = [[330, 0.5]];
+    const SOUND_UNDER = [[520, 0.35, 880]];
+    const SOUND_ALARM = [[880, 0.15], [440, 0.15], [880, 0.15], [440, 0.15]];
+
+    // The result comes as an event shortly after the charge ended; no event
+    // within the wait means within the tolerance
+    let soundLastState = null;
+    let soundPendingSince = 0;
+
+    function resultSoundStep(state, event) {
+        if (event & ChargeModeEvent.PAN_REMOVED) {
+            playTones(SOUND_ALARM);
+            soundPendingSince = 0;
+        }
+        else if (soundPendingSince) {
+            if (event & ChargeModeEvent.OVER_CHARGE) {
+                playTones(SOUND_OVER);
+                soundPendingSince = 0;
+            }
+            else if (event & ChargeModeEvent.UNDER_CHARGE) {
+                playTones(SOUND_UNDER);
+                soundPendingSince = 0;
+            }
+            else if (Date.now() - soundPendingSince > 2500 || state != ChargeModeState.REMOVE_CUP) {
+                playTones(SOUND_OK);
+                soundPendingSince = 0;
+            }
+        }
+        if (soundLastState == ChargeModeState.CHARGING && state == ChargeModeState.REMOVE_CUP) {
+            soundPendingSince = Date.now();
+        }
+        soundLastState = state;
+    }
+
+    // ---------------------------------------------------------------------
+    // Settings applied without saving them to the EEPROM
+    async function refreshUnsaved() {
+        const banner = document.getElementById("unsavedBanner");
+        try {
+            const data = await getJson("/rest/unsaved");
+            const pages = data.p || [];
+            banner.style.display = pages.length ? "" : "none";
+            document.getElementById("unsavedText").textContent =
+                `Not saved yet (lost on the next restart): ${pages.join(", ")}.`;
+        } catch (e) {
+            banner.style.display = "none";
+        }
+    }
+
+    async function saveAllSettings() {
+        try {
+            await getJson("/rest/system_control?s4=true");
+        } catch (e) {
+            alert("Saving failed");
+        }
+        refreshUnsaved();
+    }
+
+    // ---------------------------------------------------------------------
+    // Restarts and errors (Settings - System)
+    const ERROR_TEXTS = {
+        watchdog: "Hang, the watchdog restarted the trickler",
+        assert: "Internal check failed",
+        panic: "Firmware error (panic)",
+        stack: "Stack overflow of a task",
+        memory: "Out of memory",
+        fault: "Crash (hard fault)",
+    };
+
+    function formatDuration(s) {
+        const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60;
+        return h ? `${h} h ${m} min` : (m ? `${m} min ${s % 60} s` : `${s} s`);
+    }
+
+    async function renderErrorLog() {
+        const summary = document.getElementById("errorLogSummary");
+        const list = document.getElementById("errorLogList");
+        let data;
+        try {
+            data = await getJson("/rest/error_log");
+        } catch (e) {
+            summary.textContent = "-";
+            return;
+        }
+        const last = data.lr === "power" ? "power on or reset button" : (data.lr === "restart" ? "restart (reboot or update)" :
+                     (ERROR_TEXTS[data.lr] || data.lr));
+        summary.innerHTML = `Start <b>${data.bc}</b>, running for ${formatDuration(data.up)}. Last start: <b>${escapeHtml(last)}</b>. ` +
+            `Watchdog ${data.wd ? "on" : "off"}, free memory ${Math.round(data.heap / 1024)} kB.`;
+        if (!data.e.length) {
+            list.innerHTML = '<span class="opacity-80">No errors logged.</span>';
+            return;
+        }
+        list.innerHTML = data.e.map(e => {
+            const [boot, code, detail, uptime, text] = e;
+            const where = code === "assert" ? ` (${escapeHtml(text)}:${detail})` :
+                          code === "fault" ? ` (address 0x${Number(detail).toString(16)})` :
+                          text ? ` (${escapeHtml(text)})` : "";
+            return `<div class="alert alert-warning py-2">Start ${boot}, after ${formatDuration(uptime)}: ${escapeHtml(ERROR_TEXTS[code] || code)}${where}</div>`;
+        }).join("") + '<span class="opacity-80">Please export the config and send this list along when reporting a problem.</span>';
+    }
+
+    async function clearErrorLog() {
+        if (!confirm("Clear the error log?")) {
+            return;
+        }
+        try {
+            await getJson("/rest/error_log?clr=true");
+        } catch (e) {
+            console.warn(e);
+        }
+        renderErrorLog();
+    }
+
+    // ---------------------------------------------------------------------
+    // New firmware: checked in the background at most once a day
+    const FW_CHECK_STORE = "ot_fw_check";
+
+    async function backgroundUpdateCheck() {
+        const config = featureConfig || await loadFeatureConfig();
+        if (!config || !(config.f9 === true || config.f9 === "true")) {
+            showUpdateBadge(false);
+            return;
+        }
+        let stored = null;
+        try { stored = JSON.parse(localStorage.getItem(FW_CHECK_STORE) || "null"); } catch (e) {}
+        let info;
+        try {
+            info = await getJson("/rest/fw_info");
+        } catch (e) {
+            return;
+        }
+        const day = 24 * 3600 * 1000;
+        if (info.rb > info.build) {
+            showUpdateBadge(true);
+        }
+        if (!stored || Date.now() - stored.t > day) {
+            try {
+                const response = await fetch(fwRawUrl("manifest.json") + "?t=" + Date.now(), {cache: "no-store"});
+                if (!response.ok) throw new Error(response.status);
+                const m = await response.json();
+                stored = {t: Date.now(), build: m.build};
+                localStorage.setItem(FW_CHECK_STORE, JSON.stringify(stored));
+            } catch (e) {
+                // No internet (hotspot): try again next time
+                return;
+            }
+        }
+        // The trickler (Pico 2 W) also looks itself, e.g. when this browser has no internet
+        showUpdateBadge((stored && stored.build > info.build) || (info.rb > info.build));
+    }
+
+    function showUpdateBadge(show) {
+        for (const id of ["settingsUpdateBadge", "fwMenuBadge"]) {
+            const el = document.getElementById(id);
+            if (el) el.style.display = show ? "" : "none";
+        }
+    }
 
     // ---------------------------------------------------------------------
     // Recipes: charge weight and powder profile of a load
@@ -2925,6 +3322,8 @@
 
     // Open a settings page directly, e.g. /#settings-ai-trickle
     function onPageLoaded() {
+        applyTheme(currentTheme());
+        loadFeatureConfig().then(() => backgroundUpdateCheck());
         let hash = window.location.hash.substring(1);
         hash = settingsPageAliases[hash] || hash;
         if (hash.startsWith("settings-") && document.getElementById(hash)) {

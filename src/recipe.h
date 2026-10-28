@@ -54,7 +54,7 @@ uint8_t recipe_active_for(uint8_t profile_idx, float target_gr);
 // Display menu: recipe list and the selected entry
 extern uint16_t recipe_menu_idx;
 const char * recipe_menu_name(void * data, uint16_t idx);
-uint16_t recipe_menu_count(void);
+uint16_t recipe_menu_count(void * data);
 void recipe_menu_apply(void);
 
 bool http_rest_recipes(struct fs_file *file, int num_params, char *params[], char *values[]);

@@ -8,6 +8,7 @@
 #include "u8g2.h"
 #include "mini_12864_module.h"
 #include "motors.h"
+#include "neopixel_led.h"
 #include "scale.h"
 #include "display.h"
 #include "common.h"
@@ -125,6 +126,7 @@ uint8_t cleanup_mode_menu() {
         // Wait if button is pressed
         ButtonEncoderEvent_t button_encoder_event;
         xQueueReceive(encoder_event_queue, &button_encoder_event, portMAX_DELAY);
+        neopixel_led_activity();
 
         switch (button_encoder_event) {
             case BUTTON_RST_PRESSED:

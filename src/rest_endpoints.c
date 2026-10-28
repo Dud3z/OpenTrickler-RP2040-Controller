@@ -16,6 +16,9 @@
 #include "system_control.h"
 #include "ai_trickle.h"
 #include "recipe.h"
+#include "feature_config.h"
+#include "system_monitor.h"
+#include "settings_state.h"
 #include "fw_update.h"
 #include "scale_diag.h"
 
@@ -24,6 +27,8 @@
 #include "web_portal.html.h"
 #include "wizard.html.h"
 #include "styles.css.h"
+#include "favicon.ico.h"
+#include "apple_touch_icon.png.h"
 
 
 bool http_404_error(struct fs_file *file, int num_params, char *params[], char *values[]) {
@@ -48,6 +53,23 @@ bool http_styles_css(struct fs_file *file, int num_params, char *params[], char 
     file->flags = FS_FILE_FLAGS_HEADER_INCLUDED | FS_FILE_FLAGS_HEADER_PERSISTENT;
 
     return true;
+}
+
+
+static bool http_binary(struct fs_file *file, const unsigned char * data, size_t len) {
+    file->data = (const char *) data;
+    file->len = len;
+    file->index = len;
+    file->flags = FS_FILE_FLAGS_HEADER_INCLUDED | FS_FILE_FLAGS_HEADER_PERSISTENT;
+    return true;
+}
+
+bool http_favicon(struct fs_file *file, int num_params, char *params[], char *values[]) {
+    return http_binary(file, favicon_ico, favicon_ico_len);
+}
+
+bool http_apple_touch_icon(struct fs_file *file, int num_params, char *params[], char *values[]) {
+    return http_binary(file, apple_touch_icon_png, apple_touch_icon_png_len);
 }
 
 
@@ -119,12 +141,17 @@ bool rest_endpoints_init(bool default_wizard) {
     rest_register_handler("/display_buffer", http_get_display_buffer);
     rest_register_handler("/display_mirror", http_display_mirror);
     rest_register_handler("/styles.css", http_styles_css);
+    rest_register_handler("/favicon.ico", http_favicon);
+    rest_register_handler("/apple-touch-icon.png", http_apple_touch_icon);
     rest_register_handler("/ai", http_ai_trickle_page);
     rest_register_handler("/rest/ai_config", http_rest_ai_config);
     rest_register_handler("/rest/ai_model", http_rest_ai_model);
     rest_register_handler("/rest/ai_status", http_rest_ai_status);
     rest_register_handler("/rest/ai_history", http_rest_ai_history);
     rest_register_handler("/rest/recipes", http_rest_recipes);
+    rest_register_handler("/rest/feature_config", http_rest_feature_config);
+    rest_register_handler("/rest/error_log", http_rest_error_log);
+    rest_register_handler("/rest/unsaved", http_rest_unsaved);
     rest_register_handler("/rest/ai_trace", http_rest_ai_trace);
     rest_register_handler("/rest/ai_learn", http_rest_ai_learn);
     rest_register_handler("/rest/ai_series", http_rest_ai_series);

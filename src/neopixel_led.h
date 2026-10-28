@@ -93,6 +93,10 @@ extern "C" {
 bool neopixel_led_init(void);
 bool neopixel_led_config_save();
 void neopixel_led_set_colour(rgbw_u32_t mini12864_backlight_colour, rgbw_u32_t led1_colour, rgbw_u32_t led2_colour, bool block_wait);
+// Dimming after a while without use (feature_config)
+void neopixel_led_activity(void);
+void neopixel_led_idle_check(bool busy);
+bool neopixel_led_is_dimmed(void);
 bool http_rest_neopixel_led_config(struct fs_file *file, int num_params, char *params[], char *values[]);
 
 uint32_t hex_string_to_decimal(char * string);

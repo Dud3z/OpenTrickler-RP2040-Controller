@@ -47,7 +47,7 @@ STATE = {
     'series': {'sa': False, 'lad': False, 'sd': 0, 'n': 0, 's0': 0.0, 'step': 0.0, 'rep': 1, 'seq0': 0, 'tg': 42.0, 'err': ''},
     'diag': {'st': 0, 'el': 0.0, 'dur': 0, 'start': 0.0},
     'fw': {'board': 'pico2_w', 'ver': 'v2.0-5-g3428e5e', 'vcs': '3428e5e', 'build': 2, 'sup': True, 'part': 0, 'ab': True,
-           'max': 2080768, 'st': 'idle', 'err': '', 'rx': 0, 'size': 0, 'sha': '', 'conf': False},
+           'max': 2080768, 'st': 'idle', 'err': '', 'rx': 0, 'size': 0, 'sha': '', 'conf': False, 'rb': 5},
     'reboot_until': 0.0,
     'models': {},
     'requests': [],
@@ -64,6 +64,16 @@ CHARGE_MODE = {'c1': '#00ff00', 'c2': '#ffff00', 'c3': '#ff0000', 'c4': '#0000ff
                'c15': 0.25, 'c16': 1.0, 'c17': 'auto'}
 
 RECIPES = {'r': [['.308 Match', '175 SMK, CCI BR2', 42.0, 0]], 'a': -1}
+
+FEATURES = {'f0': True, 'f1': True, 'f2': 0.5, 'f3': True, 'f4': 30, 'f5': True, 'f6': 300, 'f7': 10,
+            'f8': True, 'f9': True, 'f10': True}
+ERROR_LOG = {'bc': 42, 'lr': 'watchdog', 'up': 3725, 'wd': True, 'heap': 81920,
+             'e': [[41, 'watchdog', 0, 5400, ''], [17, 'assert', 312, 80, 'trickle_model.c']]}
+UNSAVED = set()
+UNSAVED_PAGES = {'/rest/charge_mode_config': 'Charging', '/rest/feature_config': 'Safety & options', '/rest/ai_config': 'AI Trickle',
+                 '/rest/coarse_motor_config': 'Motors', '/rest/fine_motor_config': 'Motors'}
+# Charge mode events for the next state polls (tests set them through /__event)
+EVENTS = []
 
 SERVO = {'c0': False, 'c1': 0.05, 'c2': 0.1, 'c3': 0.05, 'c4': 0.1, 'c5': 1.0, 'c6': 1.0}
 
@@ -91,6 +101,23 @@ class Handler(BaseHTTPRequestHandler):
         q = {k: v[0] for k, v in parse_qs(url.query).items()}
         STATE['requests'].append(self.path)
 
+        # Unsaved settings, like the firmware (settings_state.c)
+        if url.path in UNSAVED_PAGES:
+            if as_bool(q.get('ee', 'false')):
+                UNSAVED.discard(UNSAVED_PAGES[url.path])
+            elif any(k not in ('pf', 'ro', 'ee') for k in q):
+                UNSAVED.add(UNSAVED_PAGES[url.path])
+
+        if url.path in ('/favicon.ico', '/apple-touch-icon.png'):
+            name = 'favicon.ico' if url.path == '/favicon.ico' else 'apple-touch-icon.png'
+            with open(os.path.join(SCRIPT_DIR, '..', 'src', 'html', 'icons', name), 'rb') as fp:
+                body = fp.read()
+            self.send_response(200)
+            self.send_header('Content-Type', 'image/x-icon' if name.endswith('.ico') else 'image/png')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if url.path == '/styles.css':
             with open(os.path.join(SCRIPT_DIR, '..', 'src', 'html', 'styles.css'), 'rb') as fp:
                 body = fp.read()
@@ -165,6 +192,33 @@ class Handler(BaseHTTPRequestHandler):
             page = [(h + [0.02, 0 if abs(h[2] - 42.0) < 0.001 else -1, 60 + h[0] * 30])[:12] for h in rows[:40]]
             self.send_json({'seq': STATE['history'][-1][0], 'ss': STATE.get('session', 0), 'up': 9999,
                             'more': len(rows) > 40, 'h': page})
+        elif url.path == '/rest/scale_config':
+            self.send_json({'s0': 0, 's1': 2, 's2': 0})
+        elif url.path == '/rest/mini_12864_config':
+            self.send_json({'b0': False, 'b1': 0})
+        elif url.path == '/rest/neopixel_led_config':
+            self.send_json({'bl': '#ffffff', 'l1': '#0f0f0f', 'l2': '#0f0f0f', 'l3': 2, 'l4': True, 'l5': 0})
+        elif url.path == '/rest/wireless_config':
+            self.send_json({'w0': 'HomeWiFi', 'w2': 3, 'w3': 30000, 'w4': True})
+        elif url.path == '/rest/feature_config':
+            for key, value in q.items():
+                if key in FEATURES:
+                    FEATURES[key] = as_bool(value) if isinstance(FEATURES[key], bool) else float(value)
+            self.send_json(FEATURES)
+        elif url.path == '/rest/error_log':
+            if as_bool(q.get('clr', 'false')):
+                ERROR_LOG['e'] = []
+            self.send_json(ERROR_LOG)
+        elif url.path == '/rest/unsaved':
+            self.send_json({'p': sorted(UNSAVED)})
+        elif url.path == '/rest/system_control':
+            if as_bool(q.get('s4', 'false')):
+                UNSAVED.clear()
+            self.send_json({'s0': 'E661410403', 's1': 'v2.0', 's2': '3428e5e', 's3': 'Release', 's4': False, 's5': False, 's6': False})
+        elif url.path == '/__event':
+            EVENTS.extend(int(e) for e in q.get('e', '').split(',') if e)
+            STATE['charge_state'] = int(q.get('s', STATE.get('charge_state', 3)))
+            self.send_json({'ok': True})
         elif url.path == '/rest/recipes':
             r = RECIPES['r']
             ok = True
@@ -235,7 +289,9 @@ class Handler(BaseHTTPRequestHandler):
         elif url.path == '/rest/charge_mode_state':
             if 'tap' in q:
                 STATE['taps'] += int(q['tap'])
-            self.send_json({'s0': 42.0, 's1': 12.3, 's2': 3, 's3': 1, 's4': NAMES[STATE['selected']], 's5': '9.80', 's6': True})
+            event = EVENTS.pop(0) if EVENTS else 1
+            self.send_json({'s0': 42.0, 's1': 12.3, 's2': STATE.get('charge_state', 3), 's3': event,
+                            's4': NAMES[STATE['selected']], 's5': '9.80', 's6': True})
         elif url.path == '/rest/charge_mode_config':
             for key in CHARGE_MODE:
                 if key in q:

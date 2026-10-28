@@ -18,6 +18,8 @@
 #define EEPROM_SERVO_GATE_CONFIG_BASE_ADDR     10 * 1024       // 10k
 #define EEPROM_AI_TRICKLE_BASE_ADDR            11 * 1024       // 11k
 #define EEPROM_RECIPE_BASE_ADDR                12 * 1024       // 12k
+#define EEPROM_FEATURE_CONFIG_BASE_ADDR        13 * 1024       // 13k
+#define EEPROM_ERROR_LOG_BASE_ADDR             14 * 1024       // 14k
 
 #define EEPROM_METADATA_REV                     2              // 16 byte 
 

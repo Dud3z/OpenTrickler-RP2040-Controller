@@ -54,6 +54,7 @@ bool profile_data_save();
 
 profile_t * profile_select(uint8_t idx);
 profile_t * profile_get_selected();
+uint16_t profile_get_selected_idx();
 bool profile_is_usable(const profile_t * profile);
 
 // REST interface

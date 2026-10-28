@@ -13,6 +13,7 @@
 #include "rest_endpoints.h"
 #include "common.h"
 #include "lwip/apps/mdns.h"
+#include "qrcodegen.h"
 
 
 #ifdef CYW43_HOST_NAME
@@ -79,6 +80,77 @@ const char * wireless_state_strings[] = {
 char first_line_buffer[35];
 char second_line_buffer[35];
 
+// Info pages of the WiFi view, the knob switches between them:
+// 0 = state and address, 1 = QR code of the web page, 2 = QR code to join the
+// hotspot (AP mode only)
+#define WIFI_QR_MAX_VERSION     6
+#define WIFI_QR_SCALE           2
+
+static volatile uint8_t wifi_info_page = 0;
+static uint8_t wifi_qr[qrcodegen_BUFFER_LEN_FOR_VERSION(WIFI_QR_MAX_VERSION)];
+static uint8_t wifi_qr_temp[qrcodegen_BUFFER_LEN_FOR_VERSION(WIFI_QR_MAX_VERSION)];
+static volatile bool wifi_qr_ok = false;
+static char wifi_qr_lines[3][24];
+
+
+static uint8_t wifi_info_page_count(void) {
+    return wireless_config.current_wireless_state == WIRELESS_STATE_AP_MODE_LISTEN ? 3 : 2;
+}
+
+
+// Encode the QR code of a page (in the menu task, the render task has a
+// small stack)
+static void wifi_qr_prepare(uint8_t page) {
+    char text[96];
+    const char * ip = ipaddr_ntoa(netif_ip4_addr(netif_default));
+    memset(wifi_qr_lines, 0x0, sizeof(wifi_qr_lines));
+    wifi_qr_ok = false;
+
+    if (page == 1) {
+        if (ip == NULL || strlen(ip) == 0 || strcmp(ip, "0.0.0.0") == 0) {
+            snprintf(wifi_qr_lines[0], sizeof(wifi_qr_lines[0]), "Not connected");
+            return;
+        }
+        snprintf(text, sizeof(text), "http://%s/", ip);
+        snprintf(wifi_qr_lines[0], sizeof(wifi_qr_lines[0]), "Scan to open");
+        snprintf(wifi_qr_lines[1], sizeof(wifi_qr_lines[1]), "the web page");
+        snprintf(wifi_qr_lines[2], sizeof(wifi_qr_lines[2]), "%s", ip);
+    }
+    else {
+        // Hotspot: standard WiFi QR code (phones offer to join)
+        snprintf(text, sizeof(text), "WIFI:T:WPA;S:%s;P:%s;;", host_name, AP_MODE_PASSWORD);
+        snprintf(wifi_qr_lines[0], sizeof(wifi_qr_lines[0]), "Scan to join");
+        snprintf(wifi_qr_lines[1], sizeof(wifi_qr_lines[1]), "the hotspot,");
+        snprintf(wifi_qr_lines[2], sizeof(wifi_qr_lines[2]), "then page 2");
+    }
+
+    wifi_qr_ok = qrcodegen_encodeText(text, wifi_qr_temp, wifi_qr, qrcodegen_Ecc_LOW, 1, WIFI_QR_MAX_VERSION,
+                                      qrcodegen_Mask_AUTO, true);
+}
+
+
+static void wifi_qr_draw(u8g2_t * display_handler) {
+    if (wifi_qr_ok) {
+        int size = qrcodegen_getSize(wifi_qr);
+        int scale = size * WIFI_QR_SCALE <= 60 ? WIFI_QR_SCALE : 1;
+        int px = size * scale;
+        int x0 = (64 - px) / 2 > 2 ? (64 - px) / 2 : 2;
+        int y0 = (64 - px) / 2;
+        for (int y = 0; y < size; y += 1) {
+            for (int x = 0; x < size; x += 1) {
+                if (qrcodegen_getModule(wifi_qr, x, y)) {
+                    u8g2_DrawBox(display_handler, x0 + x * scale, y0 + y * scale, scale, scale);
+                }
+            }
+        }
+    }
+    u8g2_SetFont(display_handler, u8g2_font_6x12_tf);
+    for (int i = 0; i < 3; i += 1) {
+        u8g2_DrawStr(display_handler, wifi_qr_ok ? 68 : 5, 18 + i * 14, wifi_qr_lines[i]);
+    }
+    u8g2_DrawStr(display_handler, wifi_qr_ok ? 68 : 5, 62, "Turn: next");
+}
+
 
 void wirelss_info_render_task(void *p) {
     u8g2_t * display_handler = get_display_handler();
@@ -87,6 +159,13 @@ void wirelss_info_render_task(void *p) {
         TickType_t last_render_tick = xTaskGetTickCount();
 
         u8g2_ClearBuffer(display_handler);
+
+        if (wifi_info_page != 0) {
+            wifi_qr_draw(display_handler);
+            u8g2_SendBuffer(display_handler);
+            vTaskDelayUntil(&last_render_tick, pdMS_TO_TICKS(200));
+            continue;
+        }
 
         // Draw state in the title
         const char * title_string = wireless_state_strings[wireless_config.current_wireless_state];
@@ -145,6 +224,9 @@ void wirelss_info_render_task(void *p) {
                 u8g2_SetFont(display_handler, u8g2_font_6x12_tf);
                 u8g2_DrawStr(display_handler, 5, 53, link_status_string);
             }
+
+        u8g2_SetFont(display_handler, u8g2_font_6x12_tf);
+        u8g2_DrawStr(display_handler, 5, 63, "Turn: QR code");
 
 
         u8g2_SendBuffer(display_handler);
@@ -392,6 +474,7 @@ void wireless_task(void *p) {
 
 uint8_t wireless_view_wifi_info(void) {
     static TaskHandle_t wirelss_info_render_task_handler = NULL;
+    wifi_info_page = 0;
     if (wirelss_info_render_task_handler == NULL) {
         // The render task shall have lower priority than the current one
         UBaseType_t current_task_priority = uxTaskPriorityGet(xTaskGetCurrentTaskHandle());
@@ -408,6 +491,15 @@ uint8_t wireless_view_wifi_info(void) {
         if (button_encoder_event == BUTTON_RST_PRESSED || button_encoder_event == BUTTON_ENCODER_PRESSED) {
             quit = true;
             break;
+        }
+        else if (button_encoder_event == BUTTON_ENCODER_ROTATE_CW || button_encoder_event == BUTTON_ENCODER_ROTATE_CCW) {
+            uint8_t count = wifi_info_page_count();
+            uint8_t page = button_encoder_event == BUTTON_ENCODER_ROTATE_CW ? (wifi_info_page + 1) % count :
+                                                                            (wifi_info_page + count - 1) % count;
+            if (page != 0) {
+                wifi_qr_prepare(page);
+            }
+            wifi_info_page = page;
         }
     }
 

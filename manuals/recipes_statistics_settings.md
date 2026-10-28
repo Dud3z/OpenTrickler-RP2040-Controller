@@ -28,16 +28,16 @@ The settings menu is grouped by what you do:
 
 | Group | Page | Contents |
 |---|---|---|
-| Charging | **Charging** | Controller (AI Trickle or Classic PID), stop thresholds (Classic PID only), set point accuracy, decimal places; *After the Stop*: coarse backoff, fine tube reverse, tap angle; *Servo Gate Sequence*: pre-charge and gate position (only with the servo gate) |
+| Charging | **Charging** | Controller (AI Trickle or Classic PID), stop thresholds (Classic PID only), set point accuracy, decimal places; *After the Stop*: coarse backoff, fine tube reverse, tap angle; *Servo Gate Sequence*: pre-charge and gate position (only with the servo gate); *Safety*: stop when the pan is lifted, pause when the table is bumped |
 | | **Recipes** | Loads: name, note, charge weight, profile |
 | Powder | **Profiles** | Profile selection, name, speeds, Kp/Ki/Kd (Classic PID only), **tolerance**, what AI Trickle has learned for the profile |
 | AI | **AI Trickle** | Auto speed, speed, fine reverse learned by Auto, limits in use, keep learning, throws per learning session |
 | Hardware | **Scale** | Scale driver and diagnostics |
-| | **Motors** | Coarse and fine trickler motor |
+| | **Motors** | Coarse and fine trickler motor, reduced standstill current |
 | | **Servo Gate** | Servo gate |
-| | **Display & LEDs** | Mini 12864 display, Neopixel LEDs, charge colours |
+| | **Display & LEDs** | Mini 12864 display, Neopixel LEDs, charge colours, dimming, sound on the web page |
 | System | **Wireless** | WiFi |
-| | **System** | Info, save to EEPROM, reboot, erase, backup (export/import) |
-| | **Firmware Update** | Online update |
+| | **System** | Info, save to EEPROM, reboot, erase, backup (export/import), restarts and errors, watchdog |
+| | **Firmware Update** | Online update, update notice |
 
-Each page has one **Apply** button for all its fields. The stored settings did not change with the new pages; old links like `/#settings-fine-motor` open the new page.
+Each page has one **Apply** button for all its fields; pages with changes that are applied but not saved to the EEPROM are listed at the top with a **Save now** button. The light/dark design is switched at the top right. Safety, watchdog, dimming and updates from the display: [safety_and_system.md](safety_and_system.md). The stored settings did not change with the new pages; old links like `/#settings-fine-motor` open the new page.

@@ -94,6 +94,7 @@
 #include "lwip/stats.h"
 #include "lwip/apps/fs.h"
 #include "http_rest.h"
+#include "settings_state.h"
 #include "lwip/def.h"
 
 #include "lwip/altcp.h"
@@ -2917,6 +2918,9 @@ static err_t http_find_file(struct http_state * hs, const char * uri, int is_09)
 
         rest_handler(&hs->file_handle, http_cgi_paramcount, hs->params, hs->param_vals);
         file = &hs->file_handle;
+
+        // Settings applied without saving them (shown on the web page)
+        settings_state_note_request(decoded_path, http_cgi_paramcount, hs->params, hs->param_vals);
     }
 
     if (file == NULL) {
