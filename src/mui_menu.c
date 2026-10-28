@@ -16,7 +16,6 @@
 #include "servo_gate.h"
 #include "ai_trickle.h"
 #include "recipe.h"
-#include "fw_update.h"
 
 
 // External modules/varaibles
@@ -189,28 +188,6 @@ uint8_t render_ai_learn_next_button(mui_t * ui, uint8_t msg) {
             break;
     }
 
-    return 0;
-}
-
-
-// New firmware found on GitHub (background check, Settings - Firmware Update)
-uint8_t render_update_notice(mui_t * ui, uint8_t msg) {
-    if (msg != MUIF_MSG_DRAW || !fw_update_available()) {
-        return 0;
-    }
-    u8g2_t *u8g2 = mui_get_U8g2(ui);
-    fw_download_status_t st;
-    fw_download_status(&st);
-    char buf[32];
-    if (mui_get_y(ui) < 14) {
-        // Main menu title line
-        u8g2_SetFont(u8g2, u8g2_font_helvR08_tr);
-        u8g2_DrawStr(u8g2, mui_get_x(ui), mui_get_y(ui), "Update!");
-    }
-    else {
-        snprintf(buf, sizeof(buf), "New: build %d (now %d)", st.remote_build, st.running_build);
-        u8g2_DrawStr(u8g2, mui_get_x(ui), mui_get_y(ui), buf);
-    }
     return 0;
 }
 
@@ -410,7 +387,6 @@ muif_t muif_list[] = {
 
         // Render version
         MUIF_RO("VE", render_version_page),
-        MUIF_RO("UV", render_update_notice),
 
         // AI Trickle settings
         MUIF_VARIABLE("AM", &ai_trickle_data.mode_preset, mui_u8g2_u8_opt_line_wa_mud_pi),
@@ -446,7 +422,6 @@ fds_t fds_data[] = {
     MUI_FORM(1)
     MUI_STYLE(1)
     MUI_LABEL(5,10, "OpenTrickler")
-    MUI_XY("UV", 88, 10)
     MUI_XY("HL", 0,13)
 
     MUI_STYLE(0)
@@ -707,7 +682,6 @@ fds_t fds_data[] = {
         MUI_70 "AI Trickle|"
         MUI_37 "EEPROM|"
         MUI_39 "Servo Gate|"
-        MUI_42 "Firmware Update|"
         MUI_35 "Reboot|"
         MUI_36 "Version|"
         MUI_1 "<-Return"  // Back to main menu
@@ -865,20 +839,6 @@ fds_t fds_data[] = {
     MUI_STYLE(0)
     MUI_XYAT("LV",64, 59, 10, " OK ")  // APP_STATE_ENTER_WIFI_INFO
 
-
-    // Firmware update from GitHub (Pico 2 W)
-    MUI_FORM(42)
-    MUI_STYLE(1)
-    MUI_LABEL(5,10, "Firmware Update")
-    MUI_XY("HL", 0,13)
-
-    MUI_STYLE(0)
-    MUI_LABEL(3,25, "Looks for a new firmware")
-    MUI_LABEL(3,36, "on GitHub (WiFi needed)")
-    MUI_XY("UV", 3, 47)
-
-    MUI_XYAT("LV", 100, 59, 14, " OK ")  // APP_STATE_ENTER_FW_UPDATE
-    MUI_XYAT("BN", 22, 59, 30, "Back")
 
     // Scale calibration
     MUI_FORM(51)

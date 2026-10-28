@@ -147,18 +147,6 @@ if (PICO_RP2350)
     # The bootrom verifies this hash and refuses a damaged image
     pico_hash_binary("${TARGET_NAME}")
 
-    # The trickler downloads updates from GitHub itself (display menu):
-    # HTTPS client (lwIP http_client + altcp TLS with mbedtls)
-    target_compile_definitions("${TARGET_NAME}" PRIVATE FW_DOWNLOAD=1)
-    target_sources("${TARGET_NAME}" PRIVATE ${PICO_LWIP_PATH}/src/apps/http/http_client.c)
-    target_link_libraries("${TARGET_NAME}" pico_lwip_mbedtls pico_mbedtls)
-
-    # The repository the build comes from (GitHub Actions), its 'firmware'
-    # branch holds the updates
-    if (DEFINED ENV{GITHUB_REPOSITORY})
-        target_compile_definitions("${TARGET_NAME}" PRIVATE FW_UPDATE_REPO="$ENV{GITHUB_REPOSITORY}")
-    endif()
-
     # Partition table, installed once via USB (pt.uf2)
     add_custom_command(TARGET "${TARGET_NAME}" POST_BUILD
         COMMAND picotool partition create ${CMAKE_SOURCE_DIR}/targets/pico2_w_ab_partitions.json ${CMAKE_BINARY_DIR}/pt.uf2

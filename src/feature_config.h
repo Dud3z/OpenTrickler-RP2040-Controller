@@ -33,7 +33,7 @@ typedef struct {
 
     // Web page
     bool sound;                     // Sound on the web page when a charge is done
-    bool update_notice;             // Look for new firmware (web page and display)
+    bool update_notice;             // The web page looks for new firmware
 
     // System
     bool watchdog;                  // Restart when the firmware hangs (motors stop)

@@ -17,7 +17,6 @@
 #include "neopixel_led.h"
 #include "charge_mode.h"
 #include "scale.h"
-#include "fw_update.h"
 
 
 extern charge_mode_config_t charge_mode_config;
@@ -25,8 +24,6 @@ extern charge_mode_config_t charge_mode_config;
 #define WATCHDOG_TIMEOUT_MS         8000    // RP2040 allows at most 8.3 s
 #define MONITOR_PERIOD_MS           1000
 #define ACTIVITY_WEIGHT_CHANGE_GR   0.5f    // Something put on or taken off the scale
-#define UPDATE_CHECK_FIRST_S        120     // Look for new firmware after the start ...
-#define UPDATE_CHECK_EVERY_S        (24 * 3600)     // ... and then once a day
 
 // What the firmware was doing, kept in RAM that survives a watchdog restart
 #define CRASH_RECORD_MAGIC          0x4F54C0DEu
@@ -257,7 +254,6 @@ static void system_monitor_task(void * p) {
     (void) p;
     float last_weight = NAN;
     charge_mode_state_t last_state = CHARGE_MODE_EXIT;
-    uint32_t next_update_check_s = UPDATE_CHECK_FIRST_S;
 
     while (true) {
         // A wanted restart is on its way (it uses the watchdog itself)
@@ -290,22 +286,6 @@ static void system_monitor_task(void * p) {
             last_weight = weight;
         }
         neopixel_led_idle_check(busy);
-
-        // Memory of a finished firmware check goes back to the web server
-        fw_download_idle_cleanup();
-
-        // New firmware on GitHub (Pico 2 W): shown in the menu. Never while
-        // charging, and not when the display menu checks itself
-        uint32_t uptime_s = to_ms_since_boot(get_absolute_time()) / 1000;
-        if (uptime_s >= next_update_check_s) {
-            next_update_check_s = uptime_s + UPDATE_CHECK_EVERY_S;
-            fw_download_status_t st;
-            fw_download_status(&st);
-            if (feature_config.update_notice && fw_download_supported() && state == CHARGE_MODE_EXIT &&
-                st.state != FW_DOWNLOAD_CHECKING && st.state != FW_DOWNLOAD_DOWNLOADING && st.state != FW_DOWNLOAD_DONE) {
-                fw_download_check();
-            }
-        }
 
         vTaskDelay(pdMS_TO_TICKS(MONITOR_PERIOD_MS));
     }

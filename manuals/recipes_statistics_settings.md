@@ -40,4 +40,4 @@ The settings menu is grouped by what you do:
 | | **System** | Info, save to EEPROM, reboot, erase, backup (export/import), restarts and errors, watchdog |
 | | **Firmware Update** | Online update, update notice |
 
-Each page has one **Apply** button for all its fields; pages with changes that are applied but not saved to the EEPROM are listed at the top with a **Save now** button. The light/dark design is switched at the top right. Safety, watchdog, dimming and updates from the display: [safety_and_system.md](safety_and_system.md). The stored settings did not change with the new pages; old links like `/#settings-fine-motor` open the new page.
+Each page has one **Apply** button for all its fields; pages with changes that are applied but not saved to the EEPROM are listed at the top with a **Save now** button. The light/dark design is switched at the top right. Safety, watchdog, dimming and the update notice: [safety_and_system.md](safety_and_system.md). The stored settings did not change with the new pages; old links like `/#settings-fine-motor` open the new page.

@@ -43,12 +43,9 @@ The logic is tested on the PC (`tests/sim/guard_test.c`): 50 normal charges with
 
 *Apply* without *Save to EEPROM* keeps a setting only until the next restart. The settings pages show which pages have such changes, with a **Save now** button.
 
-## Firmware updates
+## Firmware update notice
 
-* **Notice** (*Settings* → **Firmware Update**, default on): the web page looks for a new build at most once a day and marks *Settings* and *Firmware Update*. The Pico 2 W also looks itself (2 minutes after the start, then daily, never while charging); the main menu shows *Update!*.
-* **Update from the display** (Pico 2 W): *Settings* → **Firmware Update** → OK. The trickler reads the manifest of the `firmware` branch on GitHub, shows the installed and the available build, downloads `pico2_w.bin` into the free A/B partition (progress bar), checks the SHA-256 and restarts into it on a press. Settings and learned models stay (EEPROM).
-  * The connection is HTTPS; the GitHub certificate has to chain to one of the root certificates built into the firmware (`src/fw_ca_bundle.h`: USERTrust/Sectigo, DigiCert G2/G3, GlobalSign, ISRG). If GitHub ever switches to another CA, the display says that the connection or certificate check failed: update over the web page then, which always works, and regenerate the list with `scripts/make_ca_bundle.py`.
-  * The Pico W has no room for two firmware images: there the display says so; update over USB.
+* **Notice** (*Settings* → **Firmware Update**, default on): the web page looks for a new build at most once a day and marks *Settings* and *Firmware Update*. Updates are installed over the web page (Pico 2 W) or over USB (Pico W).
 
 ## Other
 

@@ -47,7 +47,7 @@ STATE = {
     'series': {'sa': False, 'lad': False, 'sd': 0, 'n': 0, 's0': 0.0, 'step': 0.0, 'rep': 1, 'seq0': 0, 'tg': 42.0, 'err': ''},
     'diag': {'st': 0, 'el': 0.0, 'dur': 0, 'start': 0.0},
     'fw': {'board': 'pico2_w', 'ver': 'v2.0-5-g3428e5e', 'vcs': '3428e5e', 'build': 2, 'sup': True, 'part': 0, 'ab': True,
-           'max': 2080768, 'st': 'idle', 'err': '', 'rx': 0, 'size': 0, 'sha': '', 'conf': False, 'rb': 5},
+           'max': 2080768, 'st': 'idle', 'err': '', 'rx': 0, 'size': 0, 'sha': '', 'conf': False},
     'reboot_until': 0.0,
     'models': {},
     'requests': [],

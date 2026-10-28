@@ -44,8 +44,6 @@ function check(name, ok, detail) {
     const lines = csv.trim().split('\n');
     check('CSV export', lines.length > 2 && lines[0].includes('"Target (gr)"') && lines[1].includes(';'), lines.length + ' lines');
 
-    check('update badge (device found a newer build)', await page.isVisible('#settingsUpdateBadge'));
-
     // Pan removed event -> dialog
     await page.evaluate(b => fetch(b + '/__event?e=8&s=4'), BASE);
     await page.waitForTimeout(1500);

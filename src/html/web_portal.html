@@ -1063,7 +1063,7 @@
                                     <option value="true">Yes</option>
                                     <option value="false">No</option>
                                 </select>
-                                <span class="text-sm opacity-80">The web page looks for a new firmware in the background (at most once a day) and marks Settings when there is one. The display shows it under Settings - Firmware Update as well.</span>
+                                <span class="text-sm opacity-80">The web page looks for a new firmware in the background (at most once a day) and marks Settings when there is one.</span>
                             </div>
                         </form>
                         <button class="btn btn-neutral page-apply-btn mt-3">Apply</button>
@@ -2538,9 +2538,6 @@
             return;
         }
         const day = 24 * 3600 * 1000;
-        if (info.rb > info.build) {
-            showUpdateBadge(true);
-        }
         if (!stored || Date.now() - stored.t > day) {
             try {
                 const response = await fetch(fwRawUrl("manifest.json") + "?t=" + Date.now(), {cache: "no-store"});
@@ -2553,8 +2550,7 @@
                 return;
             }
         }
-        // The trickler (Pico 2 W) also looks itself, e.g. when this browser has no internet
-        showUpdateBadge((stored && stored.build > info.build) || (info.rb > info.build));
+        showUpdateBadge(stored && stored.build > info.build);
     }
 
     function showUpdateBadge(show) {
